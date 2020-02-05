@@ -25,18 +25,18 @@ Steps:
 
 # 1. libraries/data
 libraries
-```{r}
+```{r include=FALSE}
 library(tidyverse)
 ```
 
 data
-```{r}
-ba <- read.csv("Data/Before_After_Combined_2-2020.csv", stringsAsFactors = FALSE, header = TRUE)
+```{r include=FALSE}
+ba <- read.csv("../Data/Before_After_Combined_2-2020.csv", stringsAsFactors = FALSE, header = TRUE)
 ```
 
 # 2. Calculate difference
 ## 2.1 Pair sites
-```{r}
+```{r include=FALSE}
 head(ba)
 ba$abundance <- as.numeric(ba$abundance)
 
@@ -72,7 +72,7 @@ ba_long <- pivot_longer(ba_pair, cols = -c(site_date, siteID_NOAA, date,
 ```
 
 ## 2.2 create diff column
-```{r}
+```{r include=FALSE}
 before <- ba_long %>%
   ungroup(date) %>%
   filter(before_after == "before") %>%
