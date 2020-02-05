@@ -114,6 +114,16 @@ kelp <- ba_diff %>%
 
 kelp + facet_wrap(~siteID_NOAA)
 
+ba_diff %>%
+  group_by(sp_code) %>%
+  dplyr::summarise(avg_cpue_bf = mean(CPUE_before), avg_cpue_af = mean(CPUE_after)) %>%
+  mutate(avg_cpue_diff = avg_cpue_bf - avg_cpue_af) %>%
+  ggplot() +
+  geom_point(mapping = aes(x = sp_code, y = avg_cpue_diff)) +
+  xlab("Species code") + ylab("Average difference in cpue") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
 # average by before/after by habitat
 ba_diff %>%
   filter(habitat == "eelgrass") %>%
