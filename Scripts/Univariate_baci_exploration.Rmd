@@ -1,0 +1,162 @@
+---
+title: "Univariate_baci_exploration_2020"
+author: "Lia Domke"
+date: "2/5/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Initial set up of the first chapter of the master thesis was to look at the potential impact of sea otters on fish communities and their composition. Through using historical seines done by NOAA between 1998-2011 BEFORE sea otters came into areas in Prince of Wales I can complete a BACI (before after controlled impact) study. 
+
+Existing data: *before* seines throughout Prince of Wales and Southeast alaska in 4 habitat types (only 2 of interest--seagrass and understory kelp) done between 1998-2011 AND *after* seines from Prince of Wales in 2017 and 2019. 
+
+These data do not include the control treatement of the experiment, only the impact. 
+
+Steps:
+
+1. include libraries and read in data
+
+2. calculate difference between counts
+
+3. visualize abundance differences
+
+# 1. libraries/data
+libraries
+```{r}
+library(tidyverse)
+```
+
+data
+```{r}
+ba <- read.csv("Data/Before_After_Combined_2-2020.csv", stringsAsFactors = FALSE, header = TRUE)
+```
+
+# 2. Calculate difference
+## 2.1 Pair sites
+```{r}
+head(ba)
+ba$abundance <- as.numeric(ba$abundance)
+
+# sum by site and seine
+fish.cpue <- ba %>%
+  group_by(siteID_NOAA, date, sp_code, before_after, habitat) %>%
+  dplyr::summarise(CPUE = sum(abundance)) %>%
+  unite("site_date", c("siteID_NOAA", "date"), remove = FALSE)
+
+fish.cpue$CPUE <- as.numeric(fish.cpue$CPUE)
+# change data structure
+ 
+ba_wide <- pivot_wider(fish.cpue, names_from = sp_code, values_from = CPUE)
+ba_wide[is.na(ba_wide)] <- 0
+
+# look at all sites
+df1 <- ba %>%
+  dplyr::select(c(siteID_NOAA, before_after, date, habitat)) %>%
+  distinct()
+
+# choose paired sites that were sampled closest to each other
+site_sub <- df1[c(1:14,18:21,25,27,32,36:39,40,42,44,46,48,53,56),]
+site_sub <- unite(site_sub, "site_date", c("siteID_NOAA", "date"))
+
+# subset data by the sites
+ba_pair <- subset(ba_wide, site_date %in% site_sub$site_date)
+
+ba_pair[15,5] <- "kelp"
+
+ba_long <- pivot_longer(ba_pair, cols = -c(site_date, siteID_NOAA, date, 
+                                             before_after,habitat), 
+                          names_to = "sp_code", values_to = "CPUE")
+```
+
+## 2.2 create diff column
+```{r}
+before <- ba_long %>%
+  ungroup(date) %>%
+  filter(before_after == "before") %>%
+  mutate(CPUE_before = CPUE) %>%
+  dplyr::select(-c(CPUE, site_date, date, before_after))
+
+after <- ba_long %>%
+  ungroup(date) %>%
+  filter(before_after == "after") %>%
+  mutate(CPUE_after = CPUE) %>%
+  dplyr::select(-c(CPUE, site_date, date, before_after))
+
+ba_long2 <- left_join(before, after, by = c("siteID_NOAA", "sp_code", "habitat"))
+
+ba_diff <- ba_long2 %>%
+  group_by(siteID_NOAA, sp_code) %>%
+  dplyr::mutate(diff = CPUE_before - CPUE_after)
+
+```
+
+# 3. visualize difference
+
+```{r}
+# all sites 
+
+eel <- ba_diff %>%
+  group_by(sp_code) %>%
+  filter(habitat == "eelgrass") %>%
+  filter(diff < 0 | diff > 0) %>%
+  ggplot() + geom_point(aes(x = sp_code, y = diff, colour = sp_code))
+
+eel + facet_wrap(~siteID_NOAA)
+
+kelp <- ba_diff %>%
+  group_by(sp_code) %>%
+  filter(habitat == "kelp") %>%
+  filter(diff < 0 | diff > 0) %>%
+  ggplot() + geom_point(aes(x = sp_code, y = diff, colour = sp_code))
+
+kelp + facet_wrap(~siteID_NOAA)
+
+# average by before/after by habitat
+ba_diff %>%
+  filter(habitat == "eelgrass") %>%
+  group_by(sp_code) %>%
+  dplyr::summarise(avg_cpue_bf = mean(CPUE_before), avg_cpue_af = mean(CPUE_after)) %>%
+  mutate(avg_cpue_diff = avg_cpue_bf - avg_cpue_af) %>%
+  filter(avg_cpue_diff < -5) %>%
+  ggplot() +
+  geom_point(mapping = aes(x = sp_code, y = avg_cpue_diff)) +
+  xlab("Species code") + ylab("Average difference in cpue") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+  
+
+ba_diff %>%
+  filter(habitat == "kelp") %>%
+  group_by(sp_code) %>%
+  dplyr::summarise(avg_cpue_bf = mean(CPUE_before), avg_cpue_af = mean(CPUE_after)) %>%
+  mutate(avg_cpue_diff = avg_cpue_bf - avg_cpue_af) %>%
+  filter(avg_cpue_diff < -5) %>%
+  ggplot() +
+  geom_point(mapping = aes(x = sp_code, y = avg_cpue_diff)) +
+  xlab("Species code") + ylab("Average difference in cpue") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+Statistics
+```{r}
+# divide by hab
+long_eel <- ba_long %>%
+  filter(habitat == "eelgrass")
+
+long_kelp <- ba_long %>%
+  filter(habitat == "kelp")
+
+eel <- lm(CPUE ~ sp_code + before_after + siteID_NOAA, data = long_eel)
+summary(eel)
+anova(eel)
+
+
+kelp <- lm(CPUE ~ sp_code + before_after + siteID_NOAA, data = long_kelp)
+summary(kelp)
+anova(kelp)
+```
+
