@@ -1,0 +1,975 @@
+---
+title: "BACI_exploration_2019"
+author: "Lia Domke"
+date: "1/8/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Initial set up of the first chapter of the master thesis was to look at the potential impact of sea otters on fish communities and their composition. Through using historical seines done by NOAA between 1998-2011 BEFORE sea otters came into areas in Prince of Wales I can complete a BACI (before after controlled impact) study. 
+
+Existing data: *before* seines throughout Prince of Wales and Southeast alaska in 4 habitat types (only 2 of interest--seagrass and understory kelp) done between 1998-2011 AND *after* seines from Prince of Wales in 2017 and 2019. 
+
+
+Goal: investigate if there appears to be a signal of sea otter impact. 
+Steps
+
+1. read in seine data from noaa, 2017, 2019. 
+
+  1.1 Appropriately label after and before seines from noaa dataframe
+  
+  1.2 Check to make sure species names/species codes are consistent between noaa seines and 
+    seines from 2017 and 2019
+    
+2. combine datasets so that the before after sites are paired
+
+  2.1 Are there any already paired before/after noaa sites
+  
+  2.2 Combine seines from 2017 and 2019 
+    - check to make sure all species are in species names
+    - use left_join to add in associated SiteIDs from NOAA data
+    
+  2.3 Calculate abundance by each seine/by site
+  
+  2.4 Subset data by only before after sites
+3. standardize data to species maximum for combined data
+
+4. test of dispersion to make sure if there are differences that it is because
+of a TRUE difference rather than a difference in variance. 
+
+4.1 clean up df in order to calculate bray curtis distance
+
+4.2 calculate bray curtis distance
+
+5. create species biplots (nmds) 
+
+  5.1 add before/after vectors
+  
+  5.2 looking at pairwise and simper test?
+
+6. look at kelp and eelgrass habitats seperately 
+
+-------------
+# libraries
+```{r, echo = FALSE}
+library(tidyverse)
+library(ggplot2)
+library(lubridate)
+library(vegan)
+library(lattice)
+library(maps)
+library(mapdata)
+library(corrgram)
+library(cowplot)
+
+```
+
+# 1. read in seine data from noaa, 2017, 2019. 
+Comment on the format of the data: SiteID indicates unique sites that may have been sampled multiple times, EventID is a unique ID for *each* time the seine net went into the water. In that way there maybe be an EventID that may be associated with multiple habitat rows (because each quadrat measured got its own row)
+```{r}
+noaa <- read.csv("../ALL_DATA/noaa_seak_fish_atlas_CLEAN.csv")
+ba <- read.csv("../../../NOAA Fish data/BeforeAfterSeinesNOAA.csv")
+seine19 <- read.csv("../ALL_DATA/Lia_fish/FishSeine_2019_RAW_10-4-19.csv",
+                    stringsAsFactors = FALSE, header = TRUE)
+seine17 <- read.csv("../../../Fish_Seine_DM/Data/Fish_mass_full_2017_derived.csv",
+                    stringsAsFactors = FALSE, header = TRUE)
+sp_names <- read.csv(url("https://knb.ecoinformatics.org/knb/d1/mn/v2/object/urn%3Auuid%3Aad2ae4aa-13ed-44b4-a3f1-c1be66c322b1"), 
+                     stringsAsFactors = FALSE, header = TRUE)
+# has to be updated on KNB before we can use url
+site_names <- read.csv("../ALL_DATA/Site_metadata_allyears.csv",
+                       stringsAsFactors = FALSE, header = TRUE)
+```
+
+## 1.1 label before and after seines
+
+Minor cleaning to get things into formation
+
+```{r}
+# lets look at which sites were seined before sea otters
+before <- ba %>%
+  filter(Before_Aft == "Before") %>%
+  mutate(Date = ymd(Date)) %>%
+  group_by(SiteID, Location, Date) %>%
+  distinct()
+
+# need the EventID associated with the SiteID and Date
+sites <- noaa %>%
+  mutate(Date = mdy(Date)) %>%
+  dplyr::select(SiteID, EventID, Date, Location) %>%
+  distinct()
+
+# left_join with before sites to get EventID 
+before2 <- before %>%
+  left_join(sites, by = c("SiteID", "Date", "Location"))
+
+beforeID <- before2$EventID
+
+after <- ba %>%
+  filter(Before_Aft == "After") %>%
+  mutate(Date = ymd(Date)) %>%
+  group_by(SiteID, Location, Date) %>%
+  distinct()
+
+after <- after %>%
+  left_join(sites, by = c("SiteID", "Date", "Location"))
+
+afterID <- after$EventID
+
+```
+
+Subset data by only the sites that were sampled either *before* or *after* sea otter recolonization
+```{r}
+glimpse(noaa)
+
+before_noaa <- subset(noaa, EventID %in% beforeID)
+before_noaa$before_after <- "before"
+# note in before there are 277 rows indicating 277 events were sampled before,
+# check this
+
+before_noaa %>%
+  group_by(SiteID, EventID) %>%
+  dplyr::summarise(count = n()) # 277 rows! 
+
+# repeat for after noaa sites
+after_noaa <- subset(noaa, EventID %in% afterID)
+# check to make sure there are the same number of sites
+after_noaa %>%
+  group_by(EventID) %>%
+  dplyr::summarise(count = n()) # hmm 70 rows.... should be 79
+
+
+missing <- anti_join(after, after_noaa, by = "EventID") # says that there are 9 sites that are after but don't have an EventID associated with it... 
+missingEventID <- subset(noaa, SiteID %in% missing$SiteID) %>%
+       dplyr::select(SiteID, EventID) %>%
+       distinct()
+
+# add back in the missing EventID numbers
+# sites are missing from the after_noaa dataframe, need to be selected from the original noaa df
+miss_seines <- subset(noaa, SiteID %in% missingEventID$SiteID)
+
+# check to make sure all the sites are there - should be 9
+miss_seines %>% 
+  group_by(SiteID, EventID) %>%
+  dplyr::summarise(count = n()) # all sites are there! 
+
+# add back into after_noaa df
+after_noaa <- bind_rows(after_noaa, miss_seines)
+after_noaa$before_after <- "after"
+# check 
+after_noaa %>% 
+  group_by(SiteID, EventID) %>% 
+  dplyr::summarise(count = n()) # 79 sites seines with site and event IDs for all
+```
+
+Recombine noaa df
+```{r}
+noaa_ba <- bind_rows(before_noaa, after_noaa) %>%
+  dplyr::select(-X) %>%
+  mutate(Date = mdy(Date))
+```
+
+## 1.2 Check species name/codes
+```{r}
+# first remove the invertebrate species
+noaa_fish <- noaa_ba %>%
+  filter(taxon != "invertebrate")
+
+# check to see if there are species in the sp_names that aren't in the noaa...
+anti_join(noaa_fish, sp_names, by = c("SpCode"))
+
+# Right now the only species code not included are the seines were nothing was caught
+# add row
+sp_names <- add_row(sp_names, SpCode = "none", Sp_CommonName = "no species caught", 
+        Sp_ScientificName = "", Taxa = "")
+
+# double check if you combine by spCode
+anti_join(noaa_fish, sp_names, by = "SpCode") # none! yay
+```
+# 2. combine datasets so that the before after sites are paired
+## 2.1 First lets check and see if there are any noaa sites that are before/after paired
+  
+Remember that the before/after designation was determined by sea otter polygons. 
+Post 2011 those were determined by a one-time presence absense survey done by boat by 
+Sonia Ibarra and Zack Hoyt -- its a different type of data... BE AWARE. 
+ 
+Also it is possible that a sea otter survey was done with no sea otters and then the seine
+occurred after, but another survey was not done soon enough to determine if there were sea otters 
+or not when the seine occured. 
+```{r}
+noaa_fish %>%
+  group_by(SiteID, EventID, before_after) %>%
+  dplyr::summarise(count = n())
+
+# sites that have paired supposedly before/after seines: 201, 202, 207, 208, 214, 215
+```
+
+## 2.2 Combine seines from 2017 and 2019 
+      - use left_join to add in associated SiteIDs from NOAA data
+```{r}
+glimpse(seine17)
+glimpse(seine19)
+
+# use consistent naming technique for sites
+# this has already been done for seine 2017
+#seine17.2 <- seine17 %>%
+  # left_join(site_names, by = c("site" = "site_2017")) %>%
+  # dplyr::select(-c(site_2018, study, freshwater, sediment_description, general_description))
+# remove any biomass information because we dont have that for 2019 yet
+seine17.2 <- seine17 %>%
+  dplyr::select(-c(a, b, fork_length_cm, mass_g))
+
+seine19.2 <- seine19 %>%
+  left_join(site_names, by = c("site" = "site_2019")) %>%
+  mutate(habitat = habitat.x) %>%
+  dplyr::select(-c(study, freshwater, sediment_description, general_description, site_2018,
+                   habitat.y, habitat.x))
+  
+
+# match character type
+seine17.2$unmeasured <- as.integer(seine17.2$unmeasured)
+# combine data sets
+seine_contemp <- bind_rows(seine17.2, seine19.2)
+
+seine_contemp2 <- unite(seine_contemp, "site_universal", c("bay_code", "bay_sample"))
+unique(seine_contemp2$site) # 46 sites
+unique(seine_contemp2$site_universal) # actually 35 UNIQUE sites
+unique(seine_contemp2$siteID_NOAA) # 10 sites that are AFTER
+
+# make sure that taxon listed as fish are actually Vertebrata
+seine_contemp2$taxon <- as.factor(seine_contemp2$taxon)
+levels(seine_contemp2$taxon)[levels(seine_contemp2$taxon)=="fish"] <- "Vertebrata"
+unique(seine_contemp2$taxon)
+
+# add in after and filter by fish
+fish_contemp <- seine_contemp2 %>%
+  group_by(site_universal, date) %>%
+  filter(taxon == "Vertebrata")
+
+unique(fish_contemp$site_universal) # 35 sites still! 
+unique(fish_contemp$siteID_NOAA) #10 noaa sites
+unique(fish_contemp$site_2017) #11 sites from 2017
+```
+
+    - Add in before/after columns
+    - Check with species names
+```{r}
+fish_contemp$before_after <- "after"
+
+fish_contemp %>% 
+  anti_join(sp_names, by = c("sp_code" = "SpCode")) # definitely missing species
+  
+# there are a few species in 2019 that have not been cleaned yet:
+# make sp_code factor so you can recode PERCHSN -> PERCHSH
+fish_contemp$sp_code <- as.factor(fish_contemp$sp_code)
+# recode sp_code
+levels(fish_contemp$sp_code)[levels(fish_contemp$sp_code)=="PERCHSN"] <- "PERCHSH"
+
+# change SCULSCA scalyhead sculpin, should be classified with Artedius sp.
+# this is because of low confidence and a variety of people identifying scalyhead sculpins when
+# frankly without hand lenses is hard to differentiate from other Artedius fish. 
+levels(fish_contemp$sp_code)[levels(fish_contemp$sp_code)=="SCULSCA"] <- "UNARTE"
+
+# roughback got entered with two species codes SCULRBCK -> SCULRGH
+levels(fish_contemp$sp_code)[levels(fish_contemp$sp_code)=="SCULRGH"] <- "SCULRBCK"
+
+# change LORDBI -> UNLORD b/c difficult to impossible to differenciate from  juvenile Red irish lord
+levels(fish_contemp$sp_code)[levels(fish_contemp$sp_code)=="LORDBI"] <- "UNLORD"
+
+levels(fish_contemp$sp_code)[levels(fish_contemp$sp_code)=="UNSOLE"] <- "UNFLAT"
+levels(fish_contemp$species_common)[levels(fish_contemp$species_common)=="Unidentified sole"] <- "Juvenile flatfish"
+
+
+fish_contemp %>% 
+  anti_join(sp_names, by = c("sp_code" = "SpCode")) # no missing species!
+
+fish_after <- fish_contemp %>%
+  mutate(Date = ymd(YYYYMMDD)) %>%
+  filter(siteID_NOAA != "NA") %>%
+  ungroup() %>%
+  dplyr::select(-date)
+
+unique(fish_after$siteID_NOAA)  # check! 
+```
+
+    - Combine fish_after (contemporary seines) with noaa_fish (both b and a seines)
+```{r}
+# check to see what columns each of these df have
+names(fish_after)
+names(noaa_fish)
+
+# adjust which columns to include
+fish_after.2 <- fish_after %>%
+  mutate(location = place_name, date = Date) %>%
+  dplyr::select(c(sp_code, date, species_common, species_scientific, taxon, fork_length,
+                  unmeasured, location, site_universal, habitat, latitude, longitude,
+                  siteID_NOAA, before_after))
+
+noaa_fish.2 <- noaa_fish %>%
+  filter(Gear == "BSEINE") %>%
+  mutate(year = Year, habitat = Habitat, latitude = Lat1, longitude = Long1, 
+         sp_code = SpCode, species_common = Sp_CommonName, species_scientific = Sp_ScientificName,
+         fork_length = Length, unmeasured = Unmeasured, siteID_NOAA = SiteID, location = Location,
+         date = Date) %>%
+  dplyr::select(c(siteID_NOAA, EventID, date, habitat, location, habitat, latitude,
+                  longitude, sp_code, species_common, species_scientific, fork_length, 
+                  unmeasured, taxon, before_after))
+
+names(fish_after.2)
+names(noaa_fish.2)
+
+fish <- bind_rows(fish_after.2, noaa_fish.2)
+```
+  
+## 2.3 Calculate abundance
+```{r}
+# Create a column with abundance
+fish$abundance <- as.numeric(ifelse(is.na(fish$fork_length), paste(fish$unmeasured), 1))
+
+# calculate number of fish by site
+fish %>%
+  group_by(siteID_NOAA, EventID, before_after) %>%
+  dplyr::summarise(total = sum(abundance))
+
+# want to identify sites that have both before and after measurements... 
+df1 <- fish %>%
+  dplyr::select(siteID_NOAA, before_after) %>%
+  distinct() %>%
+  filter(duplicated(.[["siteID_NOAA"]]))
+
+# these are the sites that have seines that occurred both before and after 
+# supposed sea otter occupation
+ba_sites <- df1$siteID_NOAA
+
+```
+
+## 2.4 Subset data by ba
+
+```{r}
+fish.sub <- subset(fish, siteID_NOAA %in% ba_sites)
+
+# check to see if all sites have before after
+df2 <- fish.sub %>%
+  dplyr::select(siteID_NOAA, location, date, before_after, habitat) %>%
+  distinct() # check! 
+
+unique(fish.sub$habitat)
+
+# fix habitat levels
+fish.sub$habitat <- as.factor(fish.sub$habitat)
+levels(fish.sub$habitat)[levels(fish.sub$habitat)=="Kelp"] <- "kelp"
+levels(fish.sub$habitat)[levels(fish.sub$habitat)=="Eelgrass"] <- "eelgrass"
+
+# at NOAA site 157 in 2019 its classified as kelp in 2019 and eelgrass in 1990
+
+# write out csv with combined seine info
+write.csv(fish.sub, "../ALL_DATA/Lia_fish/Before_After_Combined_2-2020.csv")
+```
+
+# 3. standardize data to species maximum for combined data
+
+Right now this data includes just that sites that have seine data from both before and after sea otters supposedly re-occupied an area. The data is from both NOAA seines that occurred between 1998-2011 and contemporary seines from 2017 and 2019. Seines happened *only* in either eelgrass or understory kelp sites. 
+
+## 3.1 data exploration
+
+```{r}
+# sum by site and seine
+fish.cpue <- fish.sub %>%
+  group_by(siteID_NOAA, date, sp_code, before_after, habitat) %>%
+  dplyr::summarise(CPUE = sum(abundance))
+
+# change data structure
+ 
+fish.wide <- pivot_wider(fish.cpue, names_from = sp_code, values_from = CPUE)
+fish.wide[is.na(fish.wide)] <- 0
+
+# conserve 0s in the long data structure
+
+fish.long <- pivot_longer(fish.wide, cols = -c(siteID_NOAA, date, before_after, habitat), 
+                          names_to = "sp_code", values_to = "CPUE")
+```
+
+Look at species distributions
+characteristized by a few species that are in high cpue but otherwise fish are present in low numbers. High variation 
+```{r}
+g <- ggplot(fish.long, mapping = aes(x = as.factor(siteID_NOAA), y = CPUE, fill = habitat)) +
+  geom_bar(stat = "identity")
+g + facet_wrap(~sp_code)
+
+# look at log transformation
+g <- ggplot(fish.long, mapping = aes(x = as.factor(siteID_NOAA), y = log(CPUE), fill = habitat)) +
+  geom_bar(stat = "identity")
+g + facet_wrap(~sp_code)
+
+g <- ggplot(fish.long, mapping = aes(x = as.factor(siteID_NOAA), y = (CPUE)^0.25, fill = habitat)) +
+  geom_bar(stat = "identity")
+g + facet_wrap(~sp_code)
+
+# 4th root might do a better job of visualizing low abundances....?
+
+# look at tests of normality of the data not the residuals
+non <- qplot(sample = CPUE, data = fish.long) + stat_qq_line()
+non + facet_wrap(vars(sp_code))
+
+p <- qplot(sample = log(CPUE), data = fish.long) + stat_qq_line()
+p + facet_wrap(vars(sp_code)) + theme(strip.text = element_text(size = 20))
+# this looks better... 
+
+frt <- qplot(sample = (CPUE^0.25), data = fish.long) + stat_qq_line()
+frt + facet_wrap(vars(sp_code))
+
+library(MASS)
+Rmod <- lm(formula = CPUE+1 ~ sp_code , data = fish.long)
+boxcox(Rmod)
+boxcox(Rmod, lambda=seq(from=-2.2,to=-1.8,by=.1)) 
+summary(Rmod)
+detach(package:MASS)
+
+# look at the transformed data
+g <- fish.cpue %>%
+  group_by(siteID_NOAA, date, sp_code, before_after, habitat) %>%
+  dplyr::summarise(cpue_t = (CPUE)^(-2)) %>%
+  ggplot(mapping = aes(x = as.factor(siteID_NOAA), y = cpue_t)) + 
+  geom_bar(stat = "identity")
+g + facet_wrap(~sp_code)
+
+# so, do we really need to transform the data?
+```
+
+Data will need to be standardized 
+```{r}
+
+means <- colMeans(x = fish.wide[,5:73], na.rm = TRUE)
+species <- colnames(fish.wide)[5:73]
+df2 <- remove_rownames(data.frame(species, means))
+SiteID <- pull(fish.wide[1])
+date <- pull(fish.wide[2])
+before_after <- pull(fish.wide[3])
+habitat <- pull(fish.wide[4])
+
+hist(df2$means)
+ggplot(df2, aes(species, means)) + geom_col(position = "dodge")
+
+# Scale to SPECIES MAXIMUM
+y <- fish.wide[,5:73]/max(fish.wide[,5:73])
+fish.scales <- cbind(SiteID, date, habitat, before_after, y)
+
+# visualize the scaled species
+
+fish.scales.long <- pivot_longer(fish.scales, cols = -c(SiteID, date, habitat, before_after), 
+                                 names_to = "sp_code", values_to = "CPUE_scaled")
+
+g <- ggplot(fish.scales.long, aes(x = as.factor(SiteID), y = CPUE_scaled , fill=habitat)) + 
+  geom_bar(stat = "identity")
+g + facet_wrap(~sp_code)
+
+```
+
+
+# 4. Statistical analysis: 
+test of dispersion to make sure if there are differences that it is because
+of a TRUE difference rather than a difference in variance. 
+
+## 4.1 Clean up data frame 
+so that bray-curtis distance can be calculated
+```{r}
+str(fish.scales.long) # long version of the scaled data - SPECIES MAX
+str(fish.scales) # wide version of the scaled data - SPECIES MAX
+
+# right now the SiteID represents each individual site. But because sites were re-sampled we have include information on *when* the site was resampled. So we will combine the SiteID, and date columns. 
+fish.scales2 <- unite(fish.scales, "site_all", c("SiteID", "date"))
+
+# also create a data frame with just the site info
+
+site_info <- data.frame(fish.scales2$site_all, fish.scales$SiteID, fish.scales$date,
+                        fish.scales$habitat, fish.scales$before_after)
+names(site_info) <- c("site_all", "SiteID", "date", "habitat", "before_after")
+
+# put site_all into rows 
+row.names(fish.scales2) <- fish.scales2$site_all
+fish.scales3 <- fish.scales2 %>%
+  dplyr::select(-c(site_all, habitat, before_after))# drop columns
+```
+betadisper test to look at the differences of dispersion between sites, must be 
+done before a PERMANOVA can be done. 
+
+## 4.2 calculate bray curtis distance between sites
+```{r}
+require(vegan)
+dist.bray <- vegdist(fish.scales3, method = "bray")
+
+```
+
+betadisper test:
+randomization test to compare within-group 'dispersions' with any distance measure. This tells you if the differences between sites are because of dispersion or variation or if it truly driven by a difference in sites (as can be determined by a PERMANOVA test)
+```{r}
+# calculate difference of dispersion between sites based on the difference in habitat
+(disp.hab <- betadisper(dist.bray, site_info$habitat))
+
+# calculate difference of dispersion between sites based on the difference in before/after REGARDLESS of habitat type
+(disp.ba <- betadisper(dist.bray, site_info$before_after))
+
+#  use anova to determine if there is a difference
+anova(disp.hab) # H0 accepted
+anova(disp.ba) # H0 accepted
+# H0 is true meaning that samples/objects are exchangeable or INDEPENDENT
+# Any result of a PERMANOVA is because of true differences is *any* group.
+# The take-home from all of this is simply that there is no apparent
+# difference in multivariate dispersion of the species compositions 
+# between the different management regimes, hence the assumptions of
+# the PERMANOVA are met and we can proceed:
+
+adonis2(dist.bray ~ habitat + before_after + habitat:before_after,
+        data = site_info, by = "margin") # interaction not significant, drop it
+adonis2(dist.bray ~ habitat + before_after,
+        data = site_info, perm = 9999, by = "margin") # by including margin in the model, it computers Type III sum of squares that test the significant of each term after accounting for the effects of all other terms after accounting for the effects of all other terms in the model. 
+adonis2(dist.bray ~ habitat, data = site_info)
+adonis2(dist.bray ~ before_after, data = site_info)
+
+# H0 rejects, differences are being driven by the difference in sites rather than a difference in dispersion, i.e. sites by habitat and before_after are different. Can visualize this using nmds 
+```
+
+# 5. create species biplots (nmds) 
+Compute the NMDS iterative and non parametric using "metaMDS"
+based on Bray-Curtis distances:
+
+This method of NMDS is designed to construct a map of distances among objects (sites/species) based on the rank order of the calculated distances of the objects. It forces observations that are by definition multivariate (i.e. species abundances by site) into a 2D form. 
+```{r}
+
+sp.nmds <- metaMDS(dist.bray, k = 2, autotransform = FALSE, trymax = 500)
+
+# Examine output, which includes the two major ordination axes and Kruskal's stress value:
+sp.nmds$stress # 21% stress, pretty high.. just over what should be acceptable. 
+
+# How good did the nmds do? This is the measure of goodness of fit, i.e.
+# Kruskal's stress
+stressplot(sp.nmds)
+
+# plot the data
+ordiplot(sp.nmds, display = "site", type="p", cex=1)
+# ordiellipse(sp.nmds, site_info$before_after)
+ordiellipse(sp.nmds, site_info$habitat)
+
+plot(sp.nmds$points, col=as.factor(site_info$before_after), pch=16, cex=1.5, asp=1);legend("topright", legend=levels(as.factor(site_info$before_after)), pch=16, col=1:2, cex=1.5);ordispider(sp.nmds, site_info$before_after, col=1:2, label=T);ordihull(sp.nmds, site_info$before_after, col=1:2, lty=2)
+
+plot(sp.nmds$points, col=as.factor(site_info$habitat), pch=16, cex=1.5, asp=1);legend("topright", legend=levels(as.factor(site_info$habitat)), pch=16, col=1:2, cex=1.5);ordispider(sp.nmds, site_info$habitat, col=1:2, label=T);ordihull(sp.nmds, site_info$habitat, col=1:2, lty=2)
+```
+
+## 5.1 add before/after vectors
+ Using ggplot
+
+```{r}
+scrs <- scores(sp.nmds, display = 'sites')
+scrs <- cbind(as.data.frame(scrs), BA = site_info$before_after)
+cent <- aggregate(cbind(NMDS1, NMDS2) ~ BA, data = scrs, FUN = mean)
+segs <- merge(scrs, setNames(cent, c('BA','oNMDS1','oNMDS2')),
+              by = 'BA', sort = FALSE)
+
+ 
+
+## create vectors of species correlated with nmds axis
+vec.sp <- envfit(sp.nmds$points, fish.scales3[,1:69], perm = 9999)
+vec.sp.arrows <- scores(vec.sp, display = "vectors")
+vec.sp.dat <- data.frame(vec.sp.arrows)
+vec.sp.dat$pvals <- vec.sp$vectors$pvals
+vec.sp.dat$FA <- row.names(vec.sp.dat)
+vec.sp.dat$r2 <- vec.sp$vectors$r
+
+# filter by species that are significantly correlated with nmds axis
+vec.sp.dat.sig <- vec.sp.dat %>%
+  filter(pvals < 0.001)
+
+vec.sp.dat.sig <- left_join(vec.sp.dat.sig, sp_names, by = c("FA" = "SpCode")) %>%
+  mutate(common = Sp_CommonName) %>%
+  dplyr::select(MDS1, MDS2, pvals, FA, r2, common) 
+
+# scale by nmds? 
+scalefactor <- min(max(scrs$NMDS1) - min(scrs$NMDS1), max(scrs$NMDS2) - min(scrs$NMDS2))
+vec.sp.dat.sig$MDS1_sc <- vec.sp.dat.sig$MDS1 * (scalefactor * vec.sp.dat.sig$r2)
+vec.sp.dat.sig$MDS2_sc <- vec.sp.dat.sig$MDS2 * (scalefactor * vec.sp.dat.sig$r2)
+
+# adjust arrow angles
+arrow_angle <- 90 - ((atan2(vec.sp.dat.sig$MDS1_sc, vec.sp.dat.sig$MDS2_sc)* 180)/pi)
+arrow_angle <- ifelse(arrow_angle > 90 & arrow_angle < 270, arrow_angle + 180, arrow_angle)
+arrow_hjust <- ifelse(arrow_angle > 90, 1, 0)
+
+
+ggplot(scrs, aes(x = NMDS1, y = NMDS2, colour = BA)) +
+  geom_segment(data = segs,
+               mapping = aes(xend = oNMDS1, yend = oNMDS2)) + # spiders
+  geom_point(data = cent, size = 5) +                         # centroids
+  geom_point(size = 3) +                                              # sample scores
+  coord_fixed() +
+  xlab(label = "nMDS 1") + ylab(label = "nMDS 2") + theme_classic(base_size= 30) +
+  scale_color_manual(values = c("#52854C", "#D16103"))
+  
+
+# with ellipses
+ggplot(scrs, aes(x=NMDS1, y=NMDS2, colour = BA)) +
+  geom_point(size = 3) +
+  stat_ellipse(size = 1.5) +
+  xlab(label = "nMDS 1") + ylab(label = "nMDS 2") + theme_classic(base_size= 30) +
+  scale_color_manual(values = c("#339900", "#D16103", "#3399FF")) +
+  annotate("text", x = 0.15, y = 0.6, label = "PERMANOVA p-value = 0.001", col = "black", hjust = 0, size = 7) +
+  annotate("text", x = 0.15, y = 0.55, label = "Stress = 0.218", col = "black", hjust = 0, size = 7) +
+  geom_segment(data = vec.sp.dat.sig, aes(x = 0, xend = MDS1_sc, y = 0, yend = MDS2_sc), inherit.aes=FALSE) +  # add arrows
+  geom_text(data = vec.sp.dat.sig, aes(x = MDS1_sc, y = MDS2_sc, label = common), size = 8, inherit.aes = FALSE,
+            angle = arrow_angle, hjust = arrow_hjust)
+  
+```
+ 
+
+## 5.2  Test for pairwise differences in species composition
+While doing statistical analysis in 4.2 above using adonis we did NOT test the difference between each group. Although we only have two groups in this instance (kelp/eelgrass) or (before/after) it is good practice to include this step in case the number of levels changed. 
+
+2/3/2020 Right now this code doesn't work... 
+
+```{r eval=FALSE, include=FALSE}
+# How many different possible pairs?
+combn(levels(site_info$habitat), 2)
+pairs <- combn(levels(site_info$before_after), 2)
+
+# pairwise tests (based on script from MOD 15 PERMANOVA - Franz Mueter)
+
+p.val <- rep(NA,2)  # Set up vector to hold pairwise p-values
+for(i in 1:2) {
+  pr <- pairs[i,]
+  sub <- is.element(site_info$before_after, pr)
+  d.pair <- vegdist(fish.scales3[sub,], binary=TRUE)
+  cat("\n\nComparing", pr, ":\n")
+  print(fit <-adonis2(d.pair ~  before_after + habitat, data=site_info[sub,], perm=1999))
+  p.val[i] <- fit[1,2]  # Save p-values
+  names(p.val)[i] <- paste(pr[1], "-", pr[2], sep="")
+}
+
+p.val
+```
+
+```{r eval=FALSE, include=FALSE}
+# Finally, we are interested in which species are primarily responsible 
+# for the differences among management regimes. 
+# The only optioin for the simper function is to use Bray-Curtis
+# dissimilarities. By converting the dune data to presence/absence
+# as before, we can use the same index (Sorensen = 'binary Bray-Curtis')
+# that we used with adonis above
+
+# Note this will take some time (should be < 1 min):
+(sim <- simper(dune>0, dune.env$Management, perm=999))
+summary(sim)
+
+site_ba <- as.matrix(site_info$before_after)
+sim2 <- simper(dist.bray>0, site_ba, perm = 999)
+# The output lists, for each comparison of two management regimes, the 
+# contribution of each species to the overall dissimilarity between the
+# two management regimes (column 'average'), its standard deviation (sd),
+# the ratio of the two (average/sd), and the averages within the two groups
+# (ava, avb). Because we used presence/absence, the averages by group 
+# correspond to the fraction of samples in each group that contained the 
+# species (which can also be interpreted as an estimate of the 'probability
+# of occurrence').
+```
+
+# 6. Seperate kelp/eelgrass habitats and analyze 
+
+## 6.1 First eelgrass
+
+```{r}
+fish.eel <- unite(fish.scales, "site_all", c("SiteID", "date"), remove = FALSE) %>%
+  filter(habitat == "eelgrass")
+
+# also create a data frame with just the site info
+
+eel_info <- data.frame(fish.eel$site_all, fish.eel$SiteID, fish.eel$date,
+                      fish.eel$before_after)
+names(eel_info) <- c("site_all", "SiteID", "date", "before_after")
+
+# put site_all into rows 
+row.names(fish.eel) <- fish.eel$site_all
+fish.eel2 <- fish.eel %>%
+  dplyr::select(-c(site_all, SiteID, date, habitat, before_after))# drop columns
+```
+
+calculate bray curtis distance between sites
+```{r}
+require(vegan)
+eel.bray <- vegdist(fish.eel2, method = "bray")
+```
+
+### betadisper/PERMANOVA:
+randomization test to compare within-group 'dispersions' with any distance measure. This tells you if the differences between sites are because of dispersion or variation or if it truly driven by a difference in sites (as can be determined by a PERMANOVA test)
+```{r}
+# calculate difference of dispersion between sites based on the difference in before/after
+(disp.eel.ba <- betadisper(eel.bray, eel_info$before_after))
+
+#  use anova to determine if there is a difference
+anova(disp.eel.ba) # H0 accepted
+# H0 is true meaning that samples/objects are exchangeable or INDEPENDENT
+# Any result of a PERMANOVA is because of true differences is *any* group.
+# The take-home from all of this is simply that there is no apparent
+# difference in multivariate dispersion of the species compositions 
+# between the different management regimes, hence the assumptions of
+# the PERMANOVA are met and we can proceed:
+
+adonis2(eel.bray ~ before_after,
+        data = eel_info, by = "margin") # by including margin in the model, it computers Type III sum of squares that test the significant of each term after accounting for the effects of all other terms after accounting for the effects of all other terms in the model. 
+
+# H0 rejects, differences are being driven by the difference in sites rather than a difference in dispersion, i.e. sites by before_after are different. Can visualize this using nmds 
+```
+
+### create species biplots (nmds) 
+
+Compute the NMDS iterative and non parametric using "metaMDS"
+based on Bray-Curtis distances:
+
+This method of NMDS is designed to construct a map of distances among objects (sites/species) based on the rank order of the calculated distances of the objects. It forces observations that are by definition multivariate (i.e. species abundances by site) into a 2D form. 
+```{r}
+
+eel.nmds <- metaMDS(eel.bray, k = 2, autotransform = FALSE, trymax = 500)
+
+# Examine output, which includes the two major ordination axes and Kruskal's stress value:
+eel.nmds$stress # 15.8% this is alright, a bit high but borderline going to 3 dimensions 
+
+# How good did the nmds do? This is the measure of goodness of fit, i.e.
+# Kruskal's stress
+stressplot(eel.nmds) # some spread from line... 
+
+# plot the data
+ordiplot(eel.nmds, display = "site", type="p", cex=1)
+ordiellipse(eel.nmds, eel_info$before_after) # need to be run together with previous line
+
+plot(eel.nmds$points, col=as.factor(eel_info$before_after), pch=16, cex=1.5, asp=1);legend("topright", legend=levels(as.factor(eel_info$before_after)), pch=16, col=1:2, cex=1.5);ordispider(eel.nmds, eel_info$before_after, col=1:2, label=T);ordihull(eel.nmds, eel_info$before_after, col=1:2, lty=2)
+
+# remember that this is a visualization in 2D of the cloud of data that we ran in the statistical analysis above with the PERMANOVA. 
+```
+
+### ggplot w/ sp vectors
+
+```{r}
+scrs <- scores(eel.nmds, display = 'sites')
+scrs <- cbind(as.data.frame(scrs), Before_After = fish.eel$before_after)
+cent <- aggregate(cbind(NMDS1, NMDS2) ~ Before_After, data = scrs, FUN = mean)
+segs <- merge(scrs, setNames(cent, c('Before_After','oNMDS1','oNMDS2')),
+              by = 'Before_After', sort = FALSE)
+
+## create vectors of species correlated with nmds axis
+vec.sp <- envfit(eel.nmds$points, fish.eel2[,1:63], perm = 99)
+vec.sp.arrows <- scores(vec.sp, display = "vectors")
+vec.sp.dat <- data.frame(vec.sp.arrows)
+vec.sp.dat$pvals <- vec.sp$vectors$pvals
+vec.sp.dat$FA <- row.names(vec.sp.dat)
+vec.sp.dat$r2 <- vec.sp$vectors$r
+
+# filter by species that are significantly correlated with nmds axis
+vec.sp.dat.sig <- vec.sp.dat %>%
+  filter(pvals < 0.05)
+
+vec.sp.dat.sig <- left_join(vec.sp.dat.sig, sp_names, by = c("FA" = "SpCode")) %>%
+  mutate(common = Sp_CommonName) %>%
+  dplyr::select(MDS1, MDS2, pvals, FA, r2, common) 
+
+# scale by nmds? 
+scalefactor <- min(max(scrs$NMDS1) - min(scrs$NMDS1), max(scrs$NMDS2) - min(scrs$NMDS2))
+vec.sp.dat.sig$MDS1_sc <- vec.sp.dat.sig$MDS1 * (scalefactor * vec.sp.dat.sig$r2)
+vec.sp.dat.sig$MDS2_sc <- vec.sp.dat.sig$MDS2 * (scalefactor * vec.sp.dat.sig$r2)
+
+# adjust arrow angles
+arrow_angle <- 90 - ((atan2(vec.sp.dat.sig$MDS1_sc, vec.sp.dat.sig$MDS2_sc)* 180)/pi)
+arrow_angle <- ifelse(arrow_angle > 90 & arrow_angle < 270, arrow_angle + 180, arrow_angle)
+arrow_hjust <- ifelse(arrow_angle > 90, 1, 0)
+
+
+ggplot(scrs, aes(x = NMDS1, y = NMDS2, colour = Before_After)) +
+  #geom_segment(data = segs,
+   #            mapping = aes(xend = oNMDS1, yend = oNMDS2)) + # spiders
+  geom_point(data = cent, size = 5) +                         # centroids
+  geom_point(size = 3) +                                              # sample scores
+  coord_fixed() +
+  xlab(label = "nMDS 1") + ylab(label = "nMDS 2") + theme_classic(base_size= 30) +
+  scale_color_manual(values = c("#52854C", "#D16103"))
+  
+
+# with ellipses
+ggplot(scrs, aes(x=NMDS1, y= NMDS2, colour = Before_After)) +
+  geom_point(size = 3) +
+  stat_ellipse(size = 1.5) +
+  xlab(label = "nMDS 1") + ylab(label = "nMDS 2") + 
+  ggtitle("Eelgrass fish communities") +
+  theme_classic(base_size= 30) +
+  scale_color_manual(values = c("#990066", "#003399")) +
+  annotate("text", x = -0.5, y = 0.75, label = "PERMANOVA p-value = 0.021", 
+           col = "black", hjust = 0, size = 7) +
+  annotate("text", x = -0.5, y = 0.7, label = "2D stress = 0.158", col = "black", 
+           hjust = 0, size = 7) +
+  annotate("text", label = expression(atop("Species vectors significantly correlated with"),
+                              "nmds axis at p - value 0.05"), 
+           col = "black", size = 7, hjust = 0, vjust = -0.3,  x = -0.5, y = .55) + 
+  geom_segment(data = vec.sp.dat.sig, aes(x = 0, xend = MDS1_sc, y = 0, yend = MDS2_sc),
+               inherit.aes=FALSE) +  # add arrows
+  geom_text(data = vec.sp.dat.sig, aes(x = MDS1_sc, y = MDS2_sc, label = common), size = 8,
+            inherit.aes = FALSE, angle = arrow_angle, hjust = arrow_hjust)
+```
+
+## 6.2 Kelp communities
+
+```{r}
+fish.kelp <- unite(fish.scales, "site_all", c("SiteID", "date"), remove = FALSE) %>%
+  filter(habitat == "kelp")
+
+# also create a data frame with just the site info
+
+kelp_info <- data.frame(fish.kelp$site_all, fish.kelp$SiteID, fish.kelp$date,
+                      fish.kelp$before_after)
+names(kelp_info) <- c("site_all", "SiteID", "date", "before_after")
+
+# put site_all into rows 
+row.names(fish.kelp) <- fish.kelp$site_all
+fish.kelp2 <- fish.kelp %>%
+  dplyr::select(-c(site_all, SiteID, date, habitat, before_after))# drop columns
+```
+
+calculate bray curtis distance between sites
+```{r}
+require(vegan)
+kelp.bray <- vegdist(fish.kelp2, method = "bray")
+```
+
+### betadisper/PERMANOVA:
+randomization test to compare within-group 'dispersions' with any distance measure. This tells you if the differences between sites are because of dispersion or variation or if it truly driven by a difference in sites (as can be determined by a PERMANOVA test)
+```{r}
+# calculate difference of dispersion between sites based on the difference in before/after
+(disp.kelp.ba <- betadisper(kelp.bray, kelp_info$before_after))
+
+#  use anova to determine if there is a difference
+anova(disp.eel.ba) # H0 accepted
+# H0 is true meaning that samples/objects are exchangeable or INDEPENDENT
+# Any result of a PERMANOVA is because of true differences is *any* group.
+# The take-home from all of this is simply that there is no apparent
+# difference in multivariate dispersion of the species compositions 
+# between the different management regimes, hence the assumptions of
+# the PERMANOVA are met and we can proceed:
+
+adonis2(kelp.bray ~ before_after,
+        data = kelp_info, by = "margin") # by including margin in the model, it computers Type III sum of squares that test the significant of each term after accounting for the effects of all other terms after accounting for the effects of all other terms in the model. 
+
+# H0 rejects, differences are being driven by the difference in sites rather than a difference in dispersion, i.e. sites by before_after are different. Can visualize this using nmds 
+```
+
+### create species biplots (nmds) 
+
+Compute the NMDS iterative and non parametric using "metaMDS"
+based on Bray-Curtis distances:
+
+This method of NMDS is designed to construct a map of distances among objects (sites/species) based on the rank order of the calculated distances of the objects. It forces observations that are by definition multivariate (i.e. species abundances by site) into a 2D form. 
+```{r}
+
+kelp.nmds <- metaMDS(kelp.bray, k = 2, autotransform = FALSE, trymax = 500)
+
+# Examine output, which includes the two major ordination axes and Kruskal's stress value:
+kelp.nmds$stress # 17.7% a bit high might want to consider going to 3 dimensions 
+
+# How good did the nmds do? This is the measure of goodness of fit, i.e.
+# Kruskal's stress
+stressplot(kelp.nmds) # some spread from line... 
+
+# plot the data
+ordiplot(kelp.nmds, display = "site", type="p", cex=1)
+ordiellipse(kelp.nmds, kelp_info$before_after) # need to be run together with previous line
+
+plot(kelp.nmds$points, col=as.factor(kelp_info$before_after), pch=16, cex=1.5, asp=1);legend("topright", legend=levels(as.factor(kelp_info$before_after)), pch=16, col=1:2, cex=1.5);ordispider(kelp.nmds, kelp_info$before_after, col=1:2, label=T);ordihull(kelp.nmds, kelp_info$before_after, col=1:2, lty=2)
+
+# remember that this is a visualization in 2D of the cloud of data that we ran in the statistical analysis above with the PERMANOVA. 
+```
+
+### ggplot w/ sp vectors
+
+```{r}
+scrs <- scores(kelp.nmds, display = 'sites')
+scrs <- cbind(as.data.frame(scrs), Before_After = fish.kelp$before_after)
+cent <- aggregate(cbind(NMDS1, NMDS2) ~ Before_After, data = scrs, FUN = mean)
+segs <- merge(scrs, setNames(cent, c('Before_After','oNMDS1','oNMDS2')),
+              by = 'Before_After', sort = FALSE)
+
+## create vectors of species correlated with nmds axis
+vec.sp <- envfit(kelp.nmds$points, fish.kelp2[,1:69], perm = 99)
+vec.sp.arrows <- scores(vec.sp, display = "vectors")
+vec.sp.dat <- data.frame(vec.sp.arrows)
+vec.sp.dat$pvals <- vec.sp$vectors$pvals
+vec.sp.dat$FA <- row.names(vec.sp.dat)
+vec.sp.dat$r2 <- vec.sp$vectors$r
+
+# filter by species that are significantly correlated with nmds axis
+vec.sp.dat.sig <- vec.sp.dat %>%
+  filter(pvals < 0.05)
+
+vec.sp.dat.sig <- left_join(vec.sp.dat.sig, sp_names, by = c("FA" = "SpCode")) %>%
+  mutate(common = Sp_CommonName) %>%
+  dplyr::select(MDS1, MDS2, pvals, FA, r2, common) 
+
+# scale by nmds? 
+scalefactor <- min(max(scrs$NMDS1) - min(scrs$NMDS1), max(scrs$NMDS2) - min(scrs$NMDS2))
+vec.sp.dat.sig$MDS1_sc <- vec.sp.dat.sig$MDS1 * (scalefactor * vec.sp.dat.sig$r2)
+vec.sp.dat.sig$MDS2_sc <- vec.sp.dat.sig$MDS2 * (scalefactor * vec.sp.dat.sig$r2)
+
+# adjust arrow angles
+arrow_angle <- 90 - ((atan2(vec.sp.dat.sig$MDS1_sc, vec.sp.dat.sig$MDS2_sc)* 180)/pi)
+arrow_angle <- ifelse(arrow_angle > 90 & arrow_angle < 270, arrow_angle + 180, arrow_angle)
+arrow_hjust <- ifelse(arrow_angle > 90, 1, 0)
+
+
+ggplot(scrs, aes(x = NMDS1, y = NMDS2, colour = Before_After)) +
+  #geom_segment(data = segs,
+   #            mapping = aes(xend = oNMDS1, yend = oNMDS2)) + # spiders
+  geom_point(data = cent, size = 5) +                         # centroids
+  geom_point(size = 3) +                                              # sample scores
+  coord_fixed() +
+  xlab(label = "nMDS 1") + ylab(label = "nMDS 2") + theme_classic(base_size= 30) +
+  scale_color_manual(values = c("#52854C", "#D16103"))
+  
+
+# with ellipses
+ggplot(scrs, aes(x=NMDS1, y= NMDS2, colour = Before_After)) +
+  geom_point(size = 3) +
+  stat_ellipse(size = 1.5) +
+  xlab(label = "nMDS 1") + ylab(label = "nMDS 2") + 
+  ggtitle("Understory kelp fish communities") +
+  theme_classic(base_size= 30) +
+  scale_color_manual(values = c("#990066", "#003399")) +
+  annotate("text", x = -1, y = 0.95, label = "PERMANOVA p-value = 0.016", 
+           col = "black", hjust = 0, size = 7) +
+  annotate("text", x = -1, y = 0.85, label = "2D stress = 0.177", col = "black", 
+           hjust = 0, size = 7) +
+  annotate("text", label = expression(atop("Species vectors significantly correlated with"),
+                              "nmds axis at p - value 0.05"), 
+           col = "black", size = 7, hjust = 0, vjust = 0,  x = -1, y = .6) +
+  geom_segment(data = vec.sp.dat.sig, aes(x = 0, xend = MDS1_sc, y = 0, yend = MDS2_sc),
+               inherit.aes=FALSE) +  # add arrows
+  geom_text(data = vec.sp.dat.sig, aes(x = MDS1_sc, y = MDS2_sc, label = common), size = 8,
+            inherit.aes = FALSE, angle = arrow_angle, hjust = arrow_hjust)
+```
+
+# 7. Map sites
+Try ggplot to map sites
+```{r}
+ak <- map_data("world2Hires", "USA:alaska")
+ak$long <- ak$long - 360
+
+inset_map <- ggplot() +
+  geom_polygon(ak, mapping = aes(long, lat, group = group)) +
+  coord_fixed(ratio = 1.3) +
+  xlab("") +
+  ylab("") +
+  annotate(geom = "rect", ymax = 59, ymin = 54, xmax = -139, xmin = -132, fill = NA, colour = "red") +
+  theme_bw()
+inset_map
+
+base_map <- ggplot(fish.sub) +
+  geom_point(mapping = aes(longitude, latitude, colour = habitat)) +
+  geom_polygon(mapping = aes(long, lat, group = group), data = ak, fill = "#666666") +
+  coord_map(xlim = c(-135.5, -132), ylim = c(54.5, 57.5)) +
+  scale_color_manual(values = c("#339900", "#D16103"))
+
+ggdraw(base_map) + 
+  draw_plot(inset_map, width = 8, heigh = 8, x = -133, y = 57)
+```
