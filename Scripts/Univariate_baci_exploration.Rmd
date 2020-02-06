@@ -27,6 +27,7 @@ Steps:
 libraries
 ```{r include=FALSE}
 library(tidyverse)
+library(forcats)
 ```
 
 data
@@ -151,7 +152,7 @@ ba_diff %>%
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
 ```
 
-Statistics
+## 3.1. Statistics
 ```{r}
 # divide by hab
 long_eel <- ba_long %>%
@@ -168,5 +169,64 @@ anova(eel)
 kelp <- lm(CPUE ~ sp_code + before_after + siteID_NOAA, data = long_kelp)
 summary(kelp)
 anova(kelp)
+```
+
+# 4. visualize average CPUE by habitat type and species
+ Eeelgrass 
+```{r}
+head(ba_long)
+means$sp_code <- as.character(means$sp_code)
+
+means <- ba_long %>%
+  filter(habitat == "eelgrass", sp_code == "PIPEFISH" | sp_code == "PRICKSN" |
+           sp_code == "PERCHSH" | sp_code == "SALCHUM" | sp_code == "STICK3"|
+           sp_code == "GUNNCRE" | sp_code == "SCULPSTG" | sp_code == "POLLOCK" |
+           sp_code == "HERRING" | sp_code == "TUBESNT") %>%
+  group_by(sp_code, before_after) %>%
+  dplyr::summarise(mean_cpue = mean(CPUE), sd_cpue = sd(CPUE)) %>%
+  mutate(before_after = fct_relevel(before_after, "before", "after"))
+
+ymin <- means$mean_cpue - means$sd_cpue
+ymax <- means$mean_cpue + means$sd_cpue
+
+ggplot(data = means, aes(x = sp_code, y = mean_cpue, fill = before_after)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  geom_errorbar(aes(ymin = ymin, ymax = ymax, x = sp_code), width = 0, size = 0.5, 
+                position = position_dodge(d)) +
+  theme_classic() +
+  labs(y = "Average CPUE ± s.d.", x = "Species") +
+  ggtitle("Eelgrass") +
+  guides(fill = guide_legend(title = "Legend")) +
+  scale_fill_manual(values = c("#56B4E9", "#E69F00")) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+  
+  
+
+  
+```
+
+Kelp
+```{r}
+means2 <- ba_long %>%
+  filter(habitat == "kelp", sp_code == "CAPELIN" | sp_code == "PIPEFISH" |
+           sp_code == "SALPINK" | sp_code == "SALCHUM" | sp_code == "GUNNPEN") %>%
+  group_by(sp_code, before_after) %>%
+  dplyr::summarise(mean_cpue = mean(CPUE), sd_cpue = sd(CPUE)) %>%
+  mutate(before_after = fct_relevel(before_after, "before", "after"))
+
+ymin <- means2$mean_cpue - means2$sd_cpue
+ymax <- means2$mean_cpue + means2$sd_cpue
+
+ggplot(data = means2, aes(x = sp_code, y = mean_cpue, fill = before_after)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  geom_errorbar(aes(ymin = ymin, ymax = ymax, x = sp_code), width = 0, size = 0.5, 
+                position = position_dodge(d)) +
+  theme_classic() +
+  labs(y = "Average CPUE ± s.d.", x = "Species") +
+  ggtitle("Understory kelp") +
+  guides(fill = guide_legend(title = "Legend")) +
+  scale_fill_manual(values = c("#56B4E9", "#E69F00")) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+  
 ```
 
