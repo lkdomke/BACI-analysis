@@ -35,6 +35,38 @@ data
 ba <- read.csv("../Data/Before_After_Combined_2-2020.csv", stringsAsFactors = FALSE, header = TRUE)
 ```
 
+required functions 
+```{r}
+bf.ttest <- function(e,x,cutoff){
+#Get test data and sorting data list names
+dname<-deparse(substitute(e))
+xname<-deparse(substitute(x))
+#Partition list into two groups
+e1<-cbind(x,e)[x<=cutoff,2]; e2<-cbind(x,e)[x>cutoff,2]
+n<-length(x); n1<-length(e1); n2<-length(e2)
+#Obtain group medians
+e1.med<-median(e1); e2.med<-median(e2)
+#Obtain deviations from medians
+d1<-abs(e1-e1.med); d2<-abs(e2-e2.med)
+#Obtain means of deviations from medians
+d1.ave<-mean(d1); d2.ave<-mean(d2)
+#Compute the pooled variance of deviations from the medians
+p.var<-(sum((d1-d1.ave)^2)+
+                  sum((d2-d2.ave)^2))/(n-2)
+#Calculate the test statistic
+tbf<-abs(d1.ave-d2.ave)/sqrt(p.var/n1+p.var/n2)
+#Compute the p-value using the t-distribution
+pv<-round(2*pt(-tbf,n-2),4)
+#Store the results in a list
+results<-list(statistic=c(t=tbf),parameters=c(df=n-2),
+        p.value=pv, method=paste("Brown-Forsyth test ranked by",
+          xname," and split at ",xname,"=",cutoff),data.name=dname,
+                              alternative=c("Variances are unequal"))
+#Format results as class hypothesis test and output
+class(results)<-"htest";return(results)}
+
+```
+
 # 2. Calculate difference
 ## 2.1 Pair sites
 ```{r include=FALSE}
@@ -177,11 +209,13 @@ anova(kelp)
 head(ba_long)
 means$sp_code <- as.character(means$sp_code)
 
-means <- ba_long %>%
+ba_sub <- ba_long %>%
   filter(habitat == "eelgrass", sp_code == "PIPEFISH" | sp_code == "PRICKSN" |
            sp_code == "PERCHSH" | sp_code == "SALCHUM" | sp_code == "STICK3"|
            sp_code == "GUNNCRE" | sp_code == "SCULPSTG" | sp_code == "POLLOCK" |
-           sp_code == "HERRING" | sp_code == "TUBESNT") %>%
+           sp_code == "HERRING" | sp_code == "TUBESNT")
+
+means <- ba_sub %>%
   group_by(sp_code, before_after) %>%
   dplyr::summarise(mean_cpue = mean(CPUE), sd_cpue = sd(CPUE)) %>%
   mutate(before_after = fct_relevel(before_after, "before", "after"))
@@ -199,10 +233,7 @@ ggplot(data = means, aes(x = sp_code, y = mean_cpue, fill = before_after)) +
   guides(fill = guide_legend(title = "Legend")) +
   scale_fill_manual(values = c("#56B4E9", "#E69F00")) +
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
-  
-  
 
-  
 ```
 
 Kelp
@@ -228,5 +259,67 @@ ggplot(data = means2, aes(x = sp_code, y = mean_cpue, fill = before_after)) +
   scale_fill_manual(values = c("#56B4E9", "#E69F00")) +
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
   
+```
+
+## 4.1 Determine if there are any violations of assumptions
+
+```{r}
+library("ggpubr")
+ggboxplot(ba_sub, x = "sp_code", y = "CPUE", color = "before_after",
+          palette = c("#00AFBB", "#E7B800"))
+
+
+mod1 <- lm(CPUE+1 ~ sp_code + before_after, data = ba_sub)
+summary(mod1)
+
+plot(mod1)
+
+e <- residuals(mod1)
+y.hat <- fitted.values(mod1)
+s <- summary(mod1)$sigma
+r <- e/s
+d <- rstudent(mod1)
+
+plot(e~y.hat, xlab = "fitted values", ylab = "residuals")
+
+bf.ttest(e, y.hat, cutoff = 50) # unequal variance
+shapiro.test(e) # rejects normality
+
+# use boxcox to try another transformation
+library(MASS)
+boxcox(mod1)
+boxcox(mod1, lambda=seq(from=-0.6,to=-.2,by=.1))
+
+# log transform data
+mod2 <- lm(log(CPUE +1) ~ sp_code + before_after, data = ba_sub)
+plot(mod2)
+e <- residuals(mod2)
+y.hat <- fitted.values(mod2)
+
+bf.ttest(e, y.hat, cutoff = 2)
+shapiro.test(e)
+
+# 4th root transformation
+mod3 <- lm((CPUE^(0.25)) ~ sp_code + before_after, data = ba_sub)
+plot(mod3)
+e <- residuals(mod3)
+y.hat <- fitted.values(mod3)
+
+bf.ttest(e, y.hat, cutoff = 2)
+shapiro.test(e)
+
+# normality can't really be met...
+```
+
+## 4.2 look at glms
+
+```{r}
+library(visreg)
+mod4 <- glm.nb(CPUE ~ sp_code + before_after, data = ba_sub)
+
+summary(mod4)
+plot(mod4)
+
+visreg(mod4)
 ```
 
