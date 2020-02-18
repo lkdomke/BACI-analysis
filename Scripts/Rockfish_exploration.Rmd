@@ -1,0 +1,219 @@
+---
+title: "Rockfish_exploration"
+author: "Lia Domke"
+date: "2/14/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Based on reading Olson et al. (2019) in ESA I'm curious to know how many juvenile rockfish we have caught in eelgrass and understory kelp habitats in both the recent seines (2017 and 2019) and in the NOAA seines. Juvenile recruit in BC peaks in August. Based on the NOAA seines (Murphy et al. 2000) that occured near Craig in 1998 throughout the summer found that Age<1 rockfish moved from outer protected waters (San Alberto Bay) into inside waters (Klawock Inlet) from May - June. Rockfish catch was low in April increased May - June and stayed about the same in September (no seines occured in July or August).
+
+I'm interested in a couple things:
+
+1. Do we have a lot of rockfish in the seagrass sites sampled 2017 and 2019?
+  1.1 Could I look at rockfish presence with the explanatory parameters: seagrass complexity (density, biomass, canopy height) + mesograzer biomass (should this be a specific species or all?) + distance to *nearest* canopy kelp forest. 
+  Would the nearest understory kelp forest matter? Understory kelp forest composition/biomass can predict community composition in Kachemak Bay (Efird & Konar, 2014). 
+  
+2. What are the abundances of rockfish at *paired* NOAA sites (i.e. near each other AND sampled at the same time).
+  2.1 Does biomass of understory kelp predict rockfish abundance? Is there connectivity between understory kelp ecosystems and seagrass meadows? 
+  
+One caveat to most of this is that the Olson et al. (2019) study took place in a large eelgrass bed in Chocked Passage on the Northwestern side of Calvert Island. This eelgrass bed is *deep* and spans the passage and is likely in a more exposed area. Hence why canopy kelp forests occur in next to seagrass beds (normally occuring in lower energy areas). How does this difference in physical environment translate to differences in SEAK's fish communities? 
+
+Steps: 
+1. Graph abundance of rockfish by site
+2. Graph abundance of rockfish by month
+3. Graph abundance of rockfish by habitat
+4. Graph abundance of rockfish by month for NOAA sites
+5. Graph abundance of rockfish by paired NOAA sites
+
+
+# 1. Graph abundance of rockfish by site
+Looking at the 2017, 2019 data
+
+## read in data
+```{r}
+fish_contemp <- read.csv("Data/Contemp_combined_seines17-19.csv", 
+                         header = TRUE, stringsAsFactors = FALSE)
+```
+## bring in libs
+```{r}
+library(tidyverse)
+library(lubridate)
+library(patchwork)
+```
+## data exploration
+```{r}
+head(fish_contemp)
+names(fish_contemp)
+
+# clean up df
+fish_contemp <- fish_contemp %>%
+  dplyr::select(-c(X))
+
+# see what fish are present
+unique(fish_contemp$sp_code)
+unique(fish_contemp$species_common)
+unique(fish_contemp$species_scientific)
+
+# which rockfish are present?
+# Black rockfish, Brown rockfish, Juvenile rockfish, Bocaccio 
+# ROCKBLA, ROCKBRO, ROCKCOP, ROCKQUI, ROCKSLG, BOCACCIO, UNROCK
+```
+
+## graph abundance
+
+```{r}
+rock <- fish_contemp %>%
+  filter(sp_code == "ROCKBLA" | sp_code == "ROCKBRO" | sp_code == "ROCKCOP" |
+           sp_code == "ROCKQUI" | sp_code == "ROCKSLG" | sp_code == "BOCACCIO" |
+           sp_code == "UNROCK") %>%
+  mutate(date = ymd(YYYYMMDD)) %>%
+  mutate(year = year(date)) %>%
+  mutate(julian = yday(date))
+
+rock$abundance <- as.numeric(ifelse(is.na(rock$fork_length), paste(rock$unmeasured), 1))
+
+unique(rock$site_universal) # 13 sites with rockfish present
+
+ggplot(data = rock) +
+  geom_col(data = rock, aes(x = site_universal, y = abundance, fill = habitat)) +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+rock %>%
+  group_by(site_universal, habitat, year) %>%
+  dplyr::summarise(sum = sum(abundance))
+```
+
+# 2. Graph abundance of rockfish by month
+```{r}
+rock <- rock %>%
+  mutate(month = month(date))
+
+sums <- rock %>%
+  group_by(site_universal, month) %>%
+  dplyr::summarise(sum = sum(abundance))
+
+counts <- sums %>%
+  count(month) %>%
+  group_by(month) %>%
+  dplyr::summarise(count = sum(n))
+
+ggplot(data = rock) +
+  geom_col(data = rock, aes(x = month, y = abundance, fill = sp_code)) +
+  theme_classic()
+
+ggplot(data = rock) +
+  geom_col(data = rock, aes(x = month, y = abundance, fill = habitat)) +
+  theme_classic() # not even sampling during the timeframe.... 
+  # geom_text(data = counts, aes(label = count)) # trying to add in sample sizes.. 
+```
+
+# 3. Graph abundance of rockfish by habitat
+```{r}
+rock %>%
+  ggplot() +
+  geom_col(mapping = aes(x = habitat, y = abundance)) + 
+  theme_classic()
+```
+
+# 4. Graph abundance of rockfish by month NOAA 
+## read in data
+```{r}
+noaa <- read.csv("Data/ba_noaa_combined.csv", header = TRUE, stringsAsFactors = FALSE)
+head(noaa)
+```
+
+subset by rockfish
+```{r}
+unique(noaa$Sp_CommonName)
+levels(as.factor(noaa$SpCode))
+
+noaa$Date <- as.Date(noaa$Date)
+
+# BOCACCIO ROCKCOP ROCKQUI UNROCK ROCKBRO ROCKBLA ROCKCHI ROCKDRK
+noaa.rock <- noaa %>%
+  filter(SpCode == "ROCKBLA" | SpCode == "ROCKBRO" | SpCode == "ROCKCOP" |
+           SpCode == "ROCKQUI" | SpCode == "ROCKSLG" | SpCode == "BOCACCIO" |
+           SpCode == "UNROCK" | SpCode == "ROCKCHI" | SpCode == "ROCKDRK") %>%
+  mutate(Date = ymd(Date)) %>%
+  mutate(julian = yday(Date)) %>%
+  mutate(year = year(Date)) %>%
+  mutate(month = month(Date))
+  
+noaa.rock$abundance <- as.numeric(ifelse(is.na(noaa.rock$Length), paste(noaa.rock$Unmeasured), 1))
+
+```
+
+```{r}
+head(noaa.rock)
+
+names(noaa.rock)
+
+noaa.sum <- noaa.rock %>%
+  group_by(EventID, month, SpCode, Habitat) %>%
+  dplyr::summarise(total = sum(abundance)) %>%
+  ungroup()
+
+g.noaa <- noaa.sum %>%
+  group_by(month) %>%
+  mutate(obs = n_distinct(EventID)) %>%
+  mutate(cpue = total/obs) %>%
+  ggplot() +
+  geom_col(mapping = aes(x = as.factor(month), y = cpue, fill = SpCode)) +
+  ylab("Catch per unit effort (#/seine)") +
+  xlab("Month") +
+  theme_classic()
+g.noaa + facet_wrap(~Habitat)
+
+```
+
+# 5. Graph abundance of rockfish by paired NOAA sites
+
+```{r}
+
+ba.sum <- noaa.rock %>%
+  group_by(EventID, SiteID, month, SpCode, Habitat, before_after) %>%
+  dplyr::summarise(total = sum(abundance)) %>%
+  ungroup()
+
+g.ba <- ba.sum %>%
+  group_by(month) %>%
+  mutate(obs = n_distinct(EventID)) %>%
+  mutate(cpue = total/obs) %>%
+  ggplot() +
+  geom_col(mapping = aes(x = as.factor(SiteID), y = cpue, fill = before_after)) +
+  ylab("Catch per unit effort (#/seine)") +
+  xlab("Site ID") +
+  theme_classic()
+g.ba + facet_wrap(~Habitat)
+
+ba.sum %>%
+  filter(Habitat == "Eelgrass") %>%
+  group_by(month) %>%
+  mutate(obs = n_distinct(EventID)) %>%
+  mutate(cpue = total/obs) %>%
+  ggplot() +
+  geom_col(mapping = aes(x = as.factor(SiteID), y = cpue, fill = before_after)) +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  ggtitle(label = "Eelgrass rockfish CPUE")
+  
+ba.sum %>%
+  filter(Habitat == "Kelp") %>%
+  group_by(month) %>%
+  mutate(obs = n_distinct(EventID)) %>%
+  mutate(cpue = total/obs) %>%
+  ggplot() +
+  geom_col(mapping = aes(x = as.factor(SiteID), y = cpue, fill = before_after)) +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  ggtitle(label = "Understory kelp rockfish CPUE")
+
+
+  
+```
+
