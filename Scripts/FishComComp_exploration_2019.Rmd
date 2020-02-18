@@ -70,16 +70,16 @@ library(cowplot)
 # 1. read in seine data from noaa, 2017, 2019. 
 Comment on the format of the data: SiteID indicates unique sites that may have been sampled multiple times, EventID is a unique ID for *each* time the seine net went into the water. In that way there maybe be an EventID that may be associated with multiple habitat rows (because each quadrat measured got its own row)
 ```{r}
-noaa <- read.csv("../ALL_DATA/noaa_seak_fish_atlas_CLEAN.csv")
-ba <- read.csv("../../../NOAA Fish data/BeforeAfterSeinesNOAA.csv")
-seine19 <- read.csv("../ALL_DATA/Lia_fish/FishSeine_2019_RAW_10-4-19.csv",
+noaa <- read.csv("../../APECS Master repository/APECS Master repo/ALL_DATA/noaa_seak_fish_atlas_CLEAN.csv")
+ba <- read.csv("../../NOAA Fish data/BeforeAfterSeinesNOAA.csv")
+seine19 <- read.csv("../../APECS Master repository/APECS Master repo/ALL_DATA/Lia_fish/FishSeine_2019_RAW_10-4-19.csv",
                     stringsAsFactors = FALSE, header = TRUE)
-seine17 <- read.csv("../../../Fish_Seine_DM/Data/Fish_mass_full_2017_derived.csv",
+seine17 <- read.csv("../../Fish_Seine_DM/Data/Fish_mass_full_2017_derived.csv",
                     stringsAsFactors = FALSE, header = TRUE)
 sp_names <- read.csv(url("https://knb.ecoinformatics.org/knb/d1/mn/v2/object/urn%3Auuid%3Aad2ae4aa-13ed-44b4-a3f1-c1be66c322b1"), 
                      stringsAsFactors = FALSE, header = TRUE)
 # has to be updated on KNB before we can use url
-site_names <- read.csv("../ALL_DATA/Site_metadata_allyears.csv",
+site_names <- read.csv("../../APECS Master repository/APECS Master repo/ALL_DATA/Site_metadata_allyears.csv",
                        stringsAsFactors = FALSE, header = TRUE)
 ```
 
@@ -204,6 +204,9 @@ noaa_fish %>%
   dplyr::summarise(count = n())
 
 # sites that have paired supposedly before/after seines: 201, 202, 207, 208, 214, 215
+
+# write out csv for noaa data
+write.csv(noaa_fish, "../Data/ba_noaa_combined.csv")
 ```
 
 ## 2.2 Combine seines from 2017 and 2019 
@@ -251,6 +254,9 @@ fish_contemp <- seine_contemp2 %>%
 unique(fish_contemp$site_universal) # 35 sites still! 
 unique(fish_contemp$siteID_NOAA) #10 noaa sites
 unique(fish_contemp$site_2017) #11 sites from 2017
+
+# write out combined 17 and 19 dataset
+write.csv(fish_contemp, "../Data/Contemp_combined_seines17-19.csv")
 ```
 
     - Add in before/after columns
@@ -760,7 +766,7 @@ vec.sp.dat <- data.frame(vec.sp.arrows)
 vec.sp.dat$pvals <- vec.sp$vectors$pvals
 vec.sp.dat$FA <- row.names(vec.sp.dat)
 vec.sp.dat$r2 <- vec.sp$vectors$r
-
+f
 # filter by species that are significantly correlated with nmds axis
 vec.sp.dat.sig <- vec.sp.dat %>%
   filter(pvals < 0.05)
