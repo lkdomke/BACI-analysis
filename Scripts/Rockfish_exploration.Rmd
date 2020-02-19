@@ -33,19 +33,19 @@ Steps:
 # 1. Graph abundance of rockfish by site
 Looking at the 2017, 2019 data
 
-## read in data
-```{r}
-fish_contemp <- read.csv("Data/Contemp_combined_seines17-19.csv", 
+## Read in data
+```{r include=FALSE}
+fish_contemp <- read.csv("../Data/Contemp_combined_seines17-19.csv", 
                          header = TRUE, stringsAsFactors = FALSE)
 ```
-## bring in libs
-```{r}
+## Bring in libs
+```{r include = F}
 library(tidyverse)
 library(lubridate)
 library(patchwork)
 ```
-## data exploration
-```{r}
+## Data exploration
+```{r include=FALSE}
 head(fish_contemp)
 names(fish_contemp)
 
@@ -63,9 +63,9 @@ unique(fish_contemp$species_scientific)
 # ROCKBLA, ROCKBRO, ROCKCOP, ROCKQUI, ROCKSLG, BOCACCIO, UNROCK
 ```
 
-## graph abundance
+## Graph abundance
 
-```{r}
+```{r echo=FALSE}
 rock <- fish_contemp %>%
   filter(sp_code == "ROCKBLA" | sp_code == "ROCKBRO" | sp_code == "ROCKCOP" |
            sp_code == "ROCKQUI" | sp_code == "ROCKSLG" | sp_code == "BOCACCIO" |
@@ -82,14 +82,10 @@ ggplot(data = rock) +
   geom_col(data = rock, aes(x = site_universal, y = abundance, fill = habitat)) +
   theme_classic() +
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
-
-rock %>%
-  group_by(site_universal, habitat, year) %>%
-  dplyr::summarise(sum = sum(abundance))
 ```
 
 # 2. Graph abundance of rockfish by month
-```{r}
+```{r include=FALSE}
 rock <- rock %>%
   mutate(month = month(date))
 
@@ -101,7 +97,9 @@ counts <- sums %>%
   count(month) %>%
   group_by(month) %>%
   dplyr::summarise(count = sum(n))
+```
 
+```{r}
 ggplot(data = rock) +
   geom_col(data = rock, aes(x = month, y = abundance, fill = sp_code)) +
   theme_classic()
@@ -121,14 +119,14 @@ rock %>%
 ```
 
 # 4. Graph abundance of rockfish by month NOAA 
-## read in data
-```{r}
-noaa <- read.csv("Data/ba_noaa_combined.csv", header = TRUE, stringsAsFactors = FALSE)
+## Read in data
+```{r include=FALSE}
+noaa <- read.csv("../Data/ba_noaa_combined.csv", header = TRUE, stringsAsFactors = FALSE)
 head(noaa)
 ```
 
-subset by rockfish
-```{r}
+Subset by rockfish
+```{r include=FALSE}
 unique(noaa$Sp_CommonName)
 levels(as.factor(noaa$SpCode))
 
@@ -148,7 +146,7 @@ noaa.rock$abundance <- as.numeric(ifelse(is.na(noaa.rock$Length), paste(noaa.roc
 
 ```
 
-```{r}
+```{r, include = F}
 head(noaa.rock)
 
 names(noaa.rock)
@@ -157,7 +155,8 @@ noaa.sum <- noaa.rock %>%
   group_by(EventID, month, SpCode, Habitat) %>%
   dplyr::summarise(total = sum(abundance)) %>%
   ungroup()
-
+```
+```{r}
 g.noaa <- noaa.sum %>%
   group_by(month) %>%
   mutate(obs = n_distinct(EventID)) %>%
@@ -174,6 +173,7 @@ g.noaa + facet_wrap(~Habitat)
 # 5. Graph abundance of rockfish by paired NOAA sites
 
 ```{r}
+library(ggthemes)
 
 ba.sum <- noaa.rock %>%
   group_by(EventID, SiteID, month, SpCode, Habitat, before_after) %>%
@@ -199,9 +199,13 @@ ba.sum %>%
   ggplot() +
   geom_col(mapping = aes(x = as.factor(SiteID), y = cpue, fill = before_after)) +
   theme_classic() +
+  ylab("Catch per unit effort (#/seine)") +
+  xlab("Site ID") +
   theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
-  ggtitle(label = "Eelgrass rockfish CPUE")
-  
+  ggtitle(label = "Eelgrass rockfish CPUE") +
+  scale_fill_brewer(palette="Dark2")
+
+
 ba.sum %>%
   filter(Habitat == "Kelp") %>%
   group_by(month) %>%
@@ -211,7 +215,10 @@ ba.sum %>%
   geom_col(mapping = aes(x = as.factor(SiteID), y = cpue, fill = before_after)) +
   theme_classic() +
   theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
-  ggtitle(label = "Understory kelp rockfish CPUE")
+  ylab("Catch per unit effort (#/seine)") +
+  xlab("Site ID") +
+  ggtitle(label = "Understory kelp rockfish CPUE") +
+  scale_fill_brewer(palette="Dark2")
 
 
   
