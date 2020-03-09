@@ -149,39 +149,43 @@ kelp + facet_wrap(~siteID_NOAA)
 
 ba_diff %>%
   group_by(sp_code) %>%
-  dplyr::summarise(avg_cpue_bf = mean(CPUE_before), avg_cpue_af = mean(CPUE_after)) %>%
-  mutate(avg_cpue_diff = avg_cpue_bf - avg_cpue_af) %>%
+  mutate(avg_cpue_diff = mean(diff), sd_cpue_diff = sd(diff)) %>%
   ggplot() +
   geom_point(mapping = aes(x = sp_code, y = avg_cpue_diff)) +
+  geom_errorbar(aes(x = sp_code, ymin = avg_cpue_diff - sd_cpue_diff, ymax = avg_cpue_diff + sd_cpue_diff), width = .1) +
   xlab("Species code") + ylab("Average difference in cpue") +
   theme_bw() +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+  theme(axis.text.x = element_text(angle = 45, hjust = 1), text = element_text(size = 24))
 
 # average by before/after by habitat
 ba_diff %>%
   filter(habitat == "eelgrass") %>%
   group_by(sp_code) %>%
-  dplyr::summarise(avg_cpue_bf = mean(CPUE_before), avg_cpue_af = mean(CPUE_after)) %>%
-  mutate(avg_cpue_diff = avg_cpue_bf - avg_cpue_af) %>%
-  filter(avg_cpue_diff < -5) %>%
+  mutate(avg_cpue_diff = mean(diff), sd_cpue_diff = sd(diff)) %>%
+  filter(avg_cpue_diff < -5 | avg_cpue_diff > 5) %>%
   ggplot() +
   geom_point(mapping = aes(x = sp_code, y = avg_cpue_diff)) +
-  xlab("Species code") + ylab("Average difference in cpue") +
+  geom_errorbar(aes(x = sp_code, ymin = avg_cpue_diff - sd_cpue_diff, ymax = avg_cpue_diff + sd_cpue_diff),
+                width = .1) +
+  xlab("Species code") + ylab("Average difference in CPUE ± s.d.") +
+  ggtitle("Eelgrass communities") +
   theme_bw() +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+  theme(axis.text.x = element_text(angle = 45, hjust = 1), text = element_text(size = 24))
   
 
 ba_diff %>%
   filter(habitat == "kelp") %>%
   group_by(sp_code) %>%
-  dplyr::summarise(avg_cpue_bf = mean(CPUE_before), avg_cpue_af = mean(CPUE_after)) %>%
-  mutate(avg_cpue_diff = avg_cpue_bf - avg_cpue_af) %>%
-  filter(avg_cpue_diff < -5) %>%
+  mutate(avg_cpue_diff = mean(diff), sd_cpue_diff = sd(diff)) %>%
+  filter(avg_cpue_diff < -5 | avg_cpue_diff > 5) %>%
   ggplot() +
   geom_point(mapping = aes(x = sp_code, y = avg_cpue_diff)) +
-  xlab("Species code") + ylab("Average difference in cpue") +
+  geom_errorbar(aes(x = sp_code, ymin = avg_cpue_diff - sd_cpue_diff, ymax = avg_cpue_diff + sd_cpue_diff),
+                width = .1) +
+  xlab("Species code") + ylab("Average difference in CPUE ± s.d.") +
+  ggtitle("Understory kelp communities") +
   theme_bw() +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+  theme(axis.text.x = element_text(angle = 45, hjust = 1), text = element_text(size = 24))
 ```
 
 ## 3.1. Statistics
@@ -207,32 +211,34 @@ anova(kelp)
  Eeelgrass 
 ```{r}
 head(ba_long)
-means$sp_code <- as.character(means$sp_code)
 
 ba_sub <- ba_long %>%
   filter(habitat == "eelgrass", sp_code == "PIPEFISH" | sp_code == "PRICKSN" |
            sp_code == "PERCHSH" | sp_code == "SALCHUM" | sp_code == "STICK3"|
-           sp_code == "GUNNCRE" | sp_code == "SCULPSTG" | sp_code == "POLLOCK" |
-           sp_code == "HERRING" | sp_code == "TUBESNT")
+           sp_code == "GUNNCRE" | sp_code == "SCULPSTG" | sp_code == "GREENWHI" |
+           sp_code == "GUNNCRE" | sp_code == "SANDLNCP"| sp_code == "SCULNOR" |
+           sp_code == "UNARTE" | sp_code == "SCULPAD")
 
 means <- ba_sub %>%
   group_by(sp_code, before_after) %>%
   dplyr::summarise(mean_cpue = mean(CPUE), sd_cpue = sd(CPUE)) %>%
   mutate(before_after = fct_relevel(before_after, "before", "after"))
 
+means$sp_code <- as.character(means$sp_code)
+
 ymin <- means$mean_cpue - means$sd_cpue
 ymax <- means$mean_cpue + means$sd_cpue
 
 ggplot(data = means, aes(x = sp_code, y = mean_cpue, fill = before_after)) +
-  geom_bar(stat = "identity", position = position_dodge()) +
-  geom_errorbar(aes(ymin = ymin, ymax = ymax, x = sp_code), width = 0, size = 0.5, 
-                position = position_dodge(d)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  geom_errorbar(aes(ymin = ymin, ymax = ymax, x = sp_code),
+                position = position_dodge(0.9), width = 0.2) +
   theme_classic() +
   labs(y = "Average CPUE ± s.d.", x = "Species") +
   ggtitle("Eelgrass") +
   guides(fill = guide_legend(title = "Legend")) +
   scale_fill_manual(values = c("#56B4E9", "#E69F00")) +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+  theme(axis.text.x = element_text(angle = 45, hjust = 1), text = element_text(size = 24))
 
 ```
 
@@ -240,7 +246,9 @@ Kelp
 ```{r}
 means2 <- ba_long %>%
   filter(habitat == "kelp", sp_code == "CAPELIN" | sp_code == "PIPEFISH" |
-           sp_code == "SALPINK" | sp_code == "SALCHUM" | sp_code == "GUNNPEN") %>%
+           sp_code == "SALPINK" | sp_code == "SALCHUM" | sp_code == "GREENWHI" |
+           sp_code == "SALCOHO" | sp_code == "SANDLNCP" | sp_code == "TUBESNT" |
+           sp_code == "UNARTE" | sp_code == "UNGREEN" | sp_code == "UNROCK") %>%
   group_by(sp_code, before_after) %>%
   dplyr::summarise(mean_cpue = mean(CPUE), sd_cpue = sd(CPUE)) %>%
   mutate(before_after = fct_relevel(before_after, "before", "after"))
@@ -249,15 +257,15 @@ ymin <- means2$mean_cpue - means2$sd_cpue
 ymax <- means2$mean_cpue + means2$sd_cpue
 
 ggplot(data = means2, aes(x = sp_code, y = mean_cpue, fill = before_after)) +
-  geom_bar(stat = "identity", position = position_dodge()) +
-  geom_errorbar(aes(ymin = ymin, ymax = ymax, x = sp_code), width = 0, size = 0.5, 
-                position = position_dodge(d)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  geom_errorbar(aes(ymin = ymin, ymax = ymax, x = sp_code), 
+                position = position_dodge(0.9), width = 0.1) +
   theme_classic() +
   labs(y = "Average CPUE ± s.d.", x = "Species") +
   ggtitle("Understory kelp") +
   guides(fill = guide_legend(title = "Legend")) +
   scale_fill_manual(values = c("#56B4E9", "#E69F00")) +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+  theme(axis.text.x = element_text(angle = 45, hjust = 1), text = element_text(size = 24))
   
 ```
 
