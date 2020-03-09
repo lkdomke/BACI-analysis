@@ -36,6 +36,8 @@ noaa.sub <- subset(noaa, SiteID %in% no.otts)
 
 noaa.sub <- noaa.sub %>%
   dplyr::select(-c(X, Season, Mon, SeasonNoYear))
+
+unique(noaa.sub$Date)
 ```
 
 # 3. map sites
