@@ -64,6 +64,7 @@ library(maps)
 library(mapdata)
 library(corrgram)
 library(cowplot)
+library(ggrepel)
 
 ```
 
@@ -621,7 +622,7 @@ ggplot(scrs, aes(x=NMDS1, y=NMDS2, colour = BA)) +
   annotate("text", x = 0.15, y = 0.6, label = "PERMANOVA p-value = 0.001", col = "black", hjust = 0, size = 7) +
   annotate("text", x = 0.15, y = 0.55, label = "Stress = 0.218", col = "black", hjust = 0, size = 7) +
   geom_segment(data = vec.sp.dat.sig, aes(x = 0, xend = MDS1_sc, y = 0, yend = MDS2_sc), inherit.aes=FALSE) +  # add arrows
-  geom_text(data = vec.sp.dat.sig, aes(x = MDS1_sc, y = MDS2_sc, label = common), size = 8, inherit.aes = FALSE,
+  geom_text_repel(data = vec.sp.dat.sig, aes(x = MDS1_sc, y = MDS2_sc, label = common), size = 8, inherit.aes = FALSE,
             angle = arrow_angle, hjust = arrow_hjust)
   
 ```
@@ -766,7 +767,7 @@ vec.sp.dat <- data.frame(vec.sp.arrows)
 vec.sp.dat$pvals <- vec.sp$vectors$pvals
 vec.sp.dat$FA <- row.names(vec.sp.dat)
 vec.sp.dat$r2 <- vec.sp$vectors$r
-f
+
 # filter by species that are significantly correlated with nmds axis
 vec.sp.dat.sig <- vec.sp.dat %>%
   filter(pvals < 0.05)
@@ -797,7 +798,7 @@ ggplot(scrs, aes(x = NMDS1, y = NMDS2, colour = Before_After)) +
   
 
 # with ellipses
-ggplot(scrs, aes(x=NMDS1, y= NMDS2, colour = Before_After)) +
+eel <- ggplot(scrs, aes(x=NMDS1, y= NMDS2, colour = Before_After)) +
   geom_point(size = 3) +
   stat_ellipse(size = 1.5) +
   xlab(label = "nMDS 1") + ylab(label = "nMDS 2") + 
@@ -815,6 +816,8 @@ ggplot(scrs, aes(x=NMDS1, y= NMDS2, colour = Before_After)) +
                inherit.aes=FALSE) +  # add arrows
   geom_text(data = vec.sp.dat.sig, aes(x = MDS1_sc, y = MDS2_sc, label = common), size = 8,
             inherit.aes = FALSE, angle = arrow_angle, hjust = arrow_hjust)
+
+ggsave("baci_eel_comp.png", width = 20, height = 14, units = "in")
 ```
 
 ## 6.2 Kelp communities
@@ -935,7 +938,7 @@ ggplot(scrs, aes(x = NMDS1, y = NMDS2, colour = Before_After)) +
   
 
 # with ellipses
-ggplot(scrs, aes(x=NMDS1, y= NMDS2, colour = Before_After)) +
+kelp <- ggplot(scrs, aes(x=NMDS1, y= NMDS2, colour = Before_After)) +
   geom_point(size = 3) +
   stat_ellipse(size = 1.5) +
   xlab(label = "nMDS 1") + ylab(label = "nMDS 2") + 
@@ -951,8 +954,10 @@ ggplot(scrs, aes(x=NMDS1, y= NMDS2, colour = Before_After)) +
            col = "black", size = 7, hjust = 0, vjust = 0,  x = -1, y = .6) +
   geom_segment(data = vec.sp.dat.sig, aes(x = 0, xend = MDS1_sc, y = 0, yend = MDS2_sc),
                inherit.aes=FALSE) +  # add arrows
-  geom_text(data = vec.sp.dat.sig, aes(x = MDS1_sc, y = MDS2_sc, label = common), size = 8,
+  geom_label_repel(data = vec.sp.dat.sig, aes(x = MDS1_sc, y = MDS2_sc, label = common), size = 8,
             inherit.aes = FALSE, angle = arrow_angle, hjust = arrow_hjust)
+
+ggsave("baci_kelp_comp.png", width = 20, height = 14, units = "in")
 ```
 
 # 7. Map sites
