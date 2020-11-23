@@ -3,13 +3,15 @@ title: "BACI_exploration_2019"
 author: "Lia Domke"
 date: "1/8/2020"
 output: html_document
+editor_options: 
+  chunk_output_type: console
 ---
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-Initial set up of the first chapter of the master thesis was to look at the potential impact of sea otters on fish communities and their composition. Through using historical seines done by NOAA between 1998-2011 BEFORE sea otters came into areas in Prince of Wales I can complete a BACI (before after controlled impact) study. 
+Initial set up of the second chapter of the master thesis was to look at the potential impact of sea otters on fish communities and their composition. Through using historical seines done by NOAA between 1998-2011 BEFORE sea otters came into areas in Prince of Wales I can complete a BACI (before after controlled impact) study. 
 
 Existing data: *before* seines throughout Prince of Wales and Southeast alaska in 4 habitat types (only 2 of interest--seagrass and understory kelp) done between 1998-2011 AND *after* seines from Prince of Wales in 2017 and 2019. 
 
@@ -71,17 +73,16 @@ library(ggrepel)
 # 1. read in seine data from noaa, 2017, 2019. 
 Comment on the format of the data: SiteID indicates unique sites that may have been sampled multiple times, EventID is a unique ID for *each* time the seine net went into the water. In that way there maybe be an EventID that may be associated with multiple habitat rows (because each quadrat measured got its own row)
 ```{r}
-noaa <- read.csv("../../APECS Master repository/APECS Master repo/ALL_DATA/noaa_seak_fish_atlas_CLEAN.csv")
-ba <- read.csv("../../NOAA Fish data/BeforeAfterSeinesNOAA.csv")
-seine19 <- read.csv("../../APECS Master repository/APECS Master repo/ALL_DATA/Lia_fish/FishSeine_2019_RAW_10-4-19.csv",
+noaa <- read.csv("../APECS Master repository/APECS Master repo/ALL_DATA/noaa_seak_fish_atlas_CLEAN.csv")
+ba <- read.csv("../NOAA Fish data/BeforeAfterSeinesNOAA.csv")
+seine19 <- read.csv("../APECS Master repository/APECS Master repo/ALL_DATA/Lia_fish/FishSeine_2019_RAW_10-4-19.csv",
                     stringsAsFactors = FALSE, header = TRUE)
-seine17 <- read.csv("../../Fish_Seine_DM/Data/Fish_mass_full_2017_derived.csv",
-                    stringsAsFactors = FALSE, header = TRUE)
+seine17 <- read.csv(url("https://knb.ecoinformatics.org/knb/d1/mn/v2/object/urn%3Auuid%3A8dba01ba-ebec-4b45-afe5-391947abcc6e"), stringsAsFactors = FALSE, header = TRUE)
+
 sp_names <- read.csv(url("https://knb.ecoinformatics.org/knb/d1/mn/v2/object/urn%3Auuid%3Aad2ae4aa-13ed-44b4-a3f1-c1be66c322b1"), 
                      stringsAsFactors = FALSE, header = TRUE)
 # has to be updated on KNB before we can use url
-site_names <- read.csv("../../APECS Master repository/APECS Master repo/ALL_DATA/Site_metadata_allyears.csv",
-                       stringsAsFactors = FALSE, header = TRUE)
+site_names <- read.csv(url("https://knb.ecoinformatics.org/knb/d1/mn/v2/object/urn%3Auuid%3A87744ced-530b-4bae-809e-ff1012c7ae72"), stringsAsFactors = FALSE, header = TRUE)
 ```
 
 ## 1.1 label before and after seines
@@ -562,7 +563,77 @@ ordiellipse(sp.nmds, site_info$habitat)
 plot(sp.nmds$points, col=as.factor(site_info$before_after), pch=16, cex=1.5, asp=1);legend("topright", legend=levels(as.factor(site_info$before_after)), pch=16, col=1:2, cex=1.5);ordispider(sp.nmds, site_info$before_after, col=1:2, label=T);ordihull(sp.nmds, site_info$before_after, col=1:2, lty=2)
 
 plot(sp.nmds$points, col=as.factor(site_info$habitat), pch=16, cex=1.5, asp=1);legend("topright", legend=levels(as.factor(site_info$habitat)), pch=16, col=1:2, cex=1.5);ordispider(sp.nmds, site_info$habitat, col=1:2, label=T);ordihull(sp.nmds, site_info$habitat, col=1:2, lty=2)
+
 ```
+
+## 5.01 sp comp btween habs ggplot
+```{r}
+scrs <- scores(sp.nmds, display = 'sites')
+scrs <- cbind(as.data.frame(scrs), Habitat = site_info$habitat)
+cent <- aggregate(cbind(NMDS1, NMDS2) ~ Habitat, data = scrs, FUN = mean)
+segs <- merge(scrs, setNames(cent, c('Habitat','oNMDS1','oNMDS2')),
+              by = 'Habitat', sort = FALSE)
+
+## create vectors of species correlated with nmds axis
+vec.sp <- envfit(sp.nmds$points, fish.scales3[,1:69], perm = 99)
+vec.sp.arrows <- scores(vec.sp, display = "vectors")
+vec.sp.dat <- data.frame(vec.sp.arrows)
+vec.sp.dat$pvals <- vec.sp$vectors$pvals
+vec.sp.dat$FA <- row.names(vec.sp.dat)
+vec.sp.dat$r2 <- vec.sp$vectors$r
+
+# filter by species that are significantly correlated with nmds axis
+vec.sp.dat.sig <- vec.sp.dat %>%
+  filter(pvals < 0.05)
+
+vec.sp.dat.sig <- left_join(vec.sp.dat.sig, sp_names, by = c("FA" = "SpCode")) %>%
+  mutate(common = Sp_CommonName) %>%
+  dplyr::select(MDS1, MDS2, pvals, FA, r2, common) 
+
+# scale by nmds? 
+scalefactor <- min(max(scrs$NMDS1) - min(scrs$NMDS1), max(scrs$NMDS2) - min(scrs$NMDS2))
+vec.sp.dat.sig$MDS1_sc <- vec.sp.dat.sig$MDS1 * (scalefactor * vec.sp.dat.sig$r2)
+vec.sp.dat.sig$MDS2_sc <- vec.sp.dat.sig$MDS2 * (scalefactor * vec.sp.dat.sig$r2)
+
+# adjust arrow angles
+arrow_angle <- 90 - ((atan2(vec.sp.dat.sig$MDS1_sc, vec.sp.dat.sig$MDS2_sc)* 180)/pi)
+arrow_angle <- ifelse(arrow_angle > 90 & arrow_angle < 270, arrow_angle + 180, arrow_angle)
+arrow_hjust <- ifelse(arrow_angle > 90, 1, 0)
+
+
+ggplot(scrs, aes(x = NMDS1, y = NMDS2, colour = Habitat)) +
+  #geom_segment(data = segs,
+   #            mapping = aes(xend = oNMDS1, yend = oNMDS2)) + # spiders
+  geom_point(data = cent, size = 5) +                         # centroids
+  geom_point(size = 3) +                                              # sample scores
+  coord_fixed() +
+  xlab(label = "nMDS 1") + ylab(label = "nMDS 2") + theme_classic(base_size= 30) +
+  scale_color_manual(values = c("#52854C", "#D16103"))
+  
+
+# with ellipses
+hab <- ggplot(scrs, aes(x=NMDS1, y= NMDS2, colour = Habitat)) +
+  geom_point(size = 3) +
+  stat_ellipse(size = 1.5) +
+  xlab(label = "nMDS 1") + ylab(label = "nMDS 2") + 
+  ggtitle("Nearshore fish community") +
+  theme_classic(base_size= 30) +
+  scale_color_manual(values = c("#52854C", "#D16103")) +
+  #annotate("text", x = -1, y = 0.95, label = "PERMANOVA p-value = 0.016", 
+          # col = "black", hjust = 0, size = 7) +
+  #annotate("text", x = -1, y = 0.85, label = "2D stress = 0.177", col = "black", 
+          # hjust = 0, size = 7) +
+  #annotate("text", label = expression(atop("Species vectors significantly correlated with"),
+  #                          "nmds axis at p - value 0.05"), 
+  #        col = "black", size = 7, hjust = 0, vjust = 0,  x = -1, y = .6) +
+  geom_segment(data = vec.sp.dat.sig, aes(x = 0, xend = MDS1_sc, y = 0, yend = MDS2_sc),
+               inherit.aes=FALSE) +  # add arrows
+  geom_label(data = vec.sp.dat.sig, aes(x = MDS1_sc, y = MDS2_sc, label = common), size = 8,
+            inherit.aes = FALSE, angle = arrow_angle, hjust = arrow_hjust)
+hab
+#ggsave("hab_baci_comp.png", width = 20, height = 14, units = "in")
+```
+
 
 ## 5.1 add before/after vectors
  Using ggplot
@@ -814,9 +885,10 @@ eel <- ggplot(scrs, aes(x=NMDS1, y= NMDS2, colour = Before_After)) +
            col = "black", size = 7, hjust = 0, vjust = -0.3,  x = -0.5, y = .55) + 
   geom_segment(data = vec.sp.dat.sig, aes(x = 0, xend = MDS1_sc, y = 0, yend = MDS2_sc),
                inherit.aes=FALSE) +  # add arrows
-  geom_text(data = vec.sp.dat.sig, aes(x = MDS1_sc, y = MDS2_sc, label = common), size = 8,
+  geom_label_repel(data = vec.sp.dat.sig, aes(x = MDS1_sc, y = MDS2_sc, label = common), 
+                   size = 8,
             inherit.aes = FALSE, angle = arrow_angle, hjust = arrow_hjust)
-
+eel
 ggsave("baci_eel_comp.png", width = 20, height = 14, units = "in")
 ```
 
@@ -971,7 +1043,7 @@ inset_map <- ggplot() +
   coord_fixed(ratio = 1.3) +
   xlab("") +
   ylab("") +
-  annotate(geom = "rect", ymax = 59, ymin = 54, xmax = -139, xmin = -132, fill = NA, colour = "red") +
+  annotate(geom = "rect", ymax = 59, ymin = 54, xmax = -137, xmin = -130, fill = NA, colour = "red") +
   theme_bw()
 inset_map
 
@@ -982,5 +1054,5 @@ base_map <- ggplot(fish.sub) +
   scale_color_manual(values = c("#339900", "#D16103"))
 
 ggdraw(base_map) + 
-  draw_plot(inset_map, width = 8, heigh = 8, x = -133, y = 57)
+  draw_plot(inset_map, width = 8, heigh = 8, x = -132.5, y = 57)
 ```
